@@ -110,7 +110,7 @@ For detailed setup instructions, see [SETUP.md](SETUP.md)
 
 2. **Clone Repository**
    ```bash
-   git clone https://github.com/YOUR_USERNAME/AcademicAnalyzer.git
+   git clone https://github.com/mujju-212/AcademicAnalyzer.git
    cd AcademicAnalyzer
    ```
 
@@ -346,7 +346,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 👨‍💻 Authors
 
-- **Your Name** - *Initial work* - [YourGitHub](https://github.com/YOUR_USERNAME)
+- **Mujju** - *Initial work* - [mujju-212](https://github.com/mujju-212)
 
 ## 🙏 Acknowledgments
 
@@ -361,9 +361,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 Have questions or suggestions?
 
-- **Email:** your.email@example.com
-- **GitHub Issues:** [Create an issue](https://github.com/YOUR_USERNAME/AcademicAnalyzer/issues)
-- **Discussions:** [Join discussions](https://github.com/YOUR_USERNAME/AcademicAnalyzer/discussions)
+- **Email:** mujju718263@gmail.com
+- **GitHub Issues:** [Create an issue](https://github.com/mujju-212/AcademicAnalyzer/issues)
+- **Discussions:** [Join discussions](https://github.com/mujju-212/AcademicAnalyzer/discussions)
 
 ---
 
