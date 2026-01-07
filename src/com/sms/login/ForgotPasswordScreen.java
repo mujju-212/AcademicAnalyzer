@@ -10,13 +10,15 @@ import java.util.Random;
 import java.sql.*;
 import java.net.http.*;
 import java.net.URI;
+import com.sms.util.ConfigLoader;
+import com.sms.database.DatabaseConnection;
 
 public class ForgotPasswordScreen extends JFrame {
     
-    // EmailJS Configuration - REPLACE WITH YOUR ACTUAL VALUES
-    private static final String EMAILJS_SERVICE_ID = "service_lfbk08q";   // Replace with your service ID
-    private static final String EMAILJS_TEMPLATE_ID = "template_pv6uusi"; // Replace with your template ID
-    private static final String EMAILJS_PUBLIC_KEY = "qRvUql80LlODg7Dtu";  // Replace with your public key
+    // EmailJS Configuration loaded from environment
+    private static final String EMAILJS_SERVICE_ID = ConfigLoader.getEmailJsServiceId();
+    private static final String EMAILJS_TEMPLATE_ID = ConfigLoader.getEmailJsTemplateId();
+    private static final String EMAILJS_PUBLIC_KEY = ConfigLoader.getEmailJsPublicKey();
     
     // Reuse custom components from CreateAccountScreen
     static class RoundedPanel extends JPanel {

@@ -9,13 +9,15 @@ import java.sql.*;
 import java.util.Random;
 import java.net.http.*;
 import java.net.URI;
+import com.sms.util.ConfigLoader;
+import com.sms.database.DatabaseConnection;
 
 public class CreateAccountScreen extends JFrame {
     
-    // EmailJS Configuration - REPLACE WITH YOUR ACTUAL VALUES
-    private static final String EMAILJS_SERVICE_ID = "service_lfbk08q";   // Replace with your service ID
-    private static final String EMAILJS_TEMPLATE_ID = "template_pv6uusi"; // Replace with your template ID
-    private static final String EMAILJS_PUBLIC_KEY = "qRvUql80LlODg7Dtu";  // Replace with your public key
+    // EmailJS Configuration loaded from environment
+    private static final String EMAILJS_SERVICE_ID = ConfigLoader.getEmailJsServiceId();
+    private static final String EMAILJS_TEMPLATE_ID = ConfigLoader.getEmailJsTemplateId();
+    private static final String EMAILJS_PUBLIC_KEY = ConfigLoader.getEmailJsPublicKey();
     
     // Reuse the custom components from LoginScreen
     static class RoundedPanel extends JPanel {
@@ -592,14 +594,9 @@ public class CreateAccountScreen extends JFrame {
     }
     
     private boolean checkEmailExists(String email) {
-        String url = "jdbc:mysql://localhost:3306/academic_analyzer";
-        String dbUsername = "root";
-        String dbPassword = "mk0492"; // Your MySQL password
-        
-        String sql = "SELECT COUNT(*) FROM users WHERE email = ?";
-        
-        try (Connection conn = DriverManager.getConnection(url, dbUsername, dbPassword);
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+        try (Connection conn = DatabaseConnection.getConnection()) {
+            String sql = "SELECT COUNT(*) FROM users WHERE email = ?";
+            PreparedStatement pstmt = conn.prepareStatement(sql);
             
             pstmt.setString(1, email);
             ResultSet rs = pstmt.executeQuery();
@@ -616,25 +613,22 @@ public class CreateAccountScreen extends JFrame {
     }
     
     private boolean storeOTPInDatabase(String email, String otp) {
-        String url = "jdbc:mysql://localhost:3306/academic_analyzer";
-        String dbUsername = "root";
-        String dbPassword = "mk0492"; // Your MySQL password
+        try (Connection conn = DatabaseConnection.getConnection()) {
         
-        // Create table if not exists
-        String createTableSql = "CREATE TABLE IF NOT EXISTS registration_otps (" +
-            "id INT AUTO_INCREMENT PRIMARY KEY, " +
-            "email VARCHAR(100) NOT NULL, " +
-            "otp VARCHAR(6) NOT NULL, " +
-            "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, " +
-            "expires_at TIMESTAMP NULL, " +
-            "used BOOLEAN DEFAULT FALSE, " +
-            "INDEX idx_email_otp (email, otp))";
-        
-        // Invalidate old OTPs and insert new one
-        String invalidateSql = "UPDATE registration_otps SET used = TRUE WHERE email = ? AND used = FALSE";
-        String insertSql = "INSERT INTO registration_otps (email, otp, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 10 MINUTE))";
-        
-        try (Connection conn = DriverManager.getConnection(url, dbUsername, dbPassword)) {
+            // Create table if not exists
+            String createTableSql = "CREATE TABLE IF NOT EXISTS registration_otps (" +
+                "id INT AUTO_INCREMENT PRIMARY KEY, " +
+                "email VARCHAR(100) NOT NULL, " +
+                "otp VARCHAR(6) NOT NULL, " +
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, " +
+                "expires_at TIMESTAMP NULL, " +
+                "used BOOLEAN DEFAULT FALSE, " +
+                "INDEX idx_email_otp (email, otp))";
+            
+            // Invalidate old OTPs and insert new one
+            String invalidateSql = "UPDATE registration_otps SET used = TRUE WHERE email = ? AND used = FALSE";
+            String insertSql = "INSERT INTO registration_otps (email, otp, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 10 MINUTE))";
+            
             // Create table if needed
             try (Statement stmt = conn.createStatement()) {
                 stmt.execute(createTableSql);
@@ -785,45 +779,26 @@ public class CreateAccountScreen extends JFrame {
         }
         
         private boolean saveUserToDatabase(String fullName, String username, String email, String password, String role) {
-            // Database connection details
-            String url = "jdbc:mysql://localhost:3306/academic_analyzer";
-            String dbUsername = "root";
-            String dbPassword = "mk0492"; // Change this to your MySQL password
-            
-            String sql = "INSERT INTO users (full_name, username, email, password, role) VALUES (?, ?, ?, ?, ?)";
-            
-            try {
-                // Load MySQL driver (optional for newer versions)
-                Class.forName("com.mysql.cj.jdbc.Driver");
+            try (Connection conn = DatabaseConnection.getConnection()) {
+                String sql = "INSERT INTO users (full_name, username, email, password, role) VALUES (?, ?, ?, ?, ?)";
+                PreparedStatement pstmt = conn.prepareStatement(sql);
                 
-                // Create connection
-                try (Connection conn = DriverManager.getConnection(url, dbUsername, dbPassword);
-                     PreparedStatement pstmt = conn.prepareStatement(sql)) {
-                    
-                    // Insert new user
-                    pstmt.setString(1, fullName);
-                    pstmt.setString(2, username);
-                    pstmt.setString(3, email);
-                    pstmt.setString(4, password); // In production, hash the password!
-                    pstmt.setString(5, role.toLowerCase());
-                    
-                    int rowsAffected = pstmt.executeUpdate();
-                    
-                    // Mark OTP as used after successful registration
-                    if (rowsAffected > 0) {
-                        markOTPAsUsed(email);
-                    }
-                    
-                    return rowsAffected > 0;
-                    
+                // Insert new user
+                pstmt.setString(1, fullName);
+                pstmt.setString(2, username);
+                pstmt.setString(3, email);
+                pstmt.setString(4, password); // In production, hash the password!
+                pstmt.setString(5, role.toLowerCase());
+                
+                int rowsAffected = pstmt.executeUpdate();
+                
+                // Mark OTP as used after successful registration
+                if (rowsAffected > 0) {
+                    markOTPAsUsed(email);
                 }
-            } catch (ClassNotFoundException e) {
-                JOptionPane.showMessageDialog(this, 
-                    "MySQL driver not found. Please add MySQL connector to your project.", 
-                    "Database Error", 
-                    JOptionPane.ERROR_MESSAGE);
-                e.printStackTrace();
-                return false;
+                
+                return rowsAffected > 0;
+                
             } catch (SQLException e) {
                 JOptionPane.showMessageDialog(this, 
                     "Database error: " + e.getMessage(), 
@@ -835,14 +810,9 @@ public class CreateAccountScreen extends JFrame {
         }
         
         private void markOTPAsUsed(String email) {
-            String url = "jdbc:mysql://localhost:3306/academic_analyzer";
-            String dbUsername = "root";
-            String dbPassword = "mk0492";
-            
-            String sql = "UPDATE registration_otps SET used = TRUE WHERE email = ? AND used = FALSE";
-            
-            try (Connection conn = DriverManager.getConnection(url, dbUsername, dbPassword);
-                 PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            try (Connection conn = DatabaseConnection.getConnection()) {
+                String sql = "UPDATE registration_otps SET used = TRUE WHERE email = ? AND used = FALSE";
+                PreparedStatement pstmt = conn.prepareStatement(sql);
                 
                 pstmt.setString(1, email);
                 pstmt.executeUpdate();

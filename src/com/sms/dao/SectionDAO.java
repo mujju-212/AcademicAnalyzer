@@ -50,12 +50,25 @@ public class SectionDAO {
         public String sectionName;
         public int totalStudents;
         public List<SubjectInfo> subjects;
+        public int academicYear;
+        public int semester;
         
         public SectionInfo(int id, String sectionName, int totalStudents) {
             this.id = id;
             this.sectionName = sectionName;
             this.totalStudents = totalStudents;
             this.subjects = new ArrayList<>();
+            this.academicYear = 0;
+            this.semester = 0;
+        }
+        
+        public SectionInfo(int id, String sectionName, int totalStudents, int academicYear, int semester) {
+            this.id = id;
+            this.sectionName = sectionName;
+            this.totalStudents = totalStudents;
+            this.subjects = new ArrayList<>();
+            this.academicYear = academicYear;
+            this.semester = semester;
         }
     }
     
@@ -88,6 +101,95 @@ public class SectionDAO {
         if (conn != null) {
             try {
                 conn.close();
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+    
+    // Overloaded method with year and semester
+    public boolean createSection(String sectionName, List<SubjectInfo> subjects, int totalStudents, int userId, int academicYear, int semester) {
+        Connection conn = null;
+        PreparedStatement ps = null;
+        ResultSet rs = null;
+        
+        try {
+            conn = DatabaseConnection.getConnection();
+            conn.setAutoCommit(false);
+            
+            // Check if section already exists for this user
+            String checkQuery = "SELECT COUNT(*) FROM sections WHERE section_name = ? AND created_by = ?";
+            ps = conn.prepareStatement(checkQuery);
+            ps.setString(1, sectionName);
+            ps.setInt(2, userId);
+            rs = ps.executeQuery();
+            if (rs.next() && rs.getInt(1) > 0) {
+                System.err.println("Section already exists: " + sectionName);
+                return false;
+            }
+            rs.close();
+            ps.close();
+            
+            // 1. Insert section with year and semester
+            String insertSection = "INSERT INTO sections (section_name, total_students, created_by, academic_year, semester) VALUES (?, ?, ?, ?, ?)";
+            ps = conn.prepareStatement(insertSection, Statement.RETURN_GENERATED_KEYS);
+            ps.setString(1, sectionName);
+            ps.setInt(2, totalStudents);
+            ps.setInt(3, userId);
+            ps.setInt(4, academicYear);
+            ps.setInt(5, semester);
+            
+            int rowsAffected = ps.executeUpdate();
+            
+            // Get the generated section ID
+            rs = ps.getGeneratedKeys();
+            int sectionId = 0;
+            if (rs.next()) {
+                sectionId = rs.getInt(1);
+            } else {
+                throw new SQLException("Failed to get generated section ID");
+            }
+            rs.close();
+            ps.close();
+            
+            // 2. For each subject, check if it exists or create it
+            for (SubjectInfo subjectInfo : subjects) {
+                int subjectId = getOrCreateSubject(conn, subjectInfo.subjectName, userId);
+                
+                // 3. Create section-subject mapping
+                String insertMapping = "INSERT INTO section_subjects (section_id, subject_id, max_marks, passing_marks, credit) VALUES (?, ?, ?, ?, ?)";
+                ps = conn.prepareStatement(insertMapping);
+                ps.setInt(1, sectionId);
+                ps.setInt(2, subjectId);
+                ps.setInt(3, subjectInfo.totalMarks);
+                ps.setInt(4, subjectInfo.passMarks);
+                ps.setInt(5, subjectInfo.credit);
+                ps.executeUpdate();
+                ps.close();
+            }
+            
+            conn.commit();
+            return true;
+            
+        } catch (SQLException e) {
+            System.err.println("SQL Error in createSection: " + e.getMessage());
+            e.printStackTrace();
+            if (conn != null) {
+                try {
+                    conn.rollback();
+                } catch (SQLException ex) {
+                    ex.printStackTrace();
+                }
+            }
+            return false;
+        } finally {
+            try {
+                if (rs != null) rs.close();
+                if (ps != null) ps.close();
+                if (conn != null) {
+                    conn.setAutoCommit(true);
+                    // Don't close singleton connection
+                }
             } catch (SQLException e) {
                 e.printStackTrace();
             }
@@ -172,7 +274,7 @@ public class SectionDAO {
                 if (ps != null) ps.close();
                 if (conn != null) {
                     conn.setAutoCommit(true);
-                    closeConnection(conn);
+                    // Don't close singleton connection
                 }
             } catch (SQLException e) {
                 e.printStackTrace();
@@ -728,20 +830,37 @@ public class SectionDAO {
         
         try {
             conn = DatabaseConnection.getConnection();
-            String query = "SELECT id, section_name, total_students FROM sections " +
-                          "WHERE created_by = ? ORDER BY section_name";
+            System.out.println("getSectionsByUser called for userId: " + userId);
+            
+            String query = "SELECT id, section_name, total_students, COALESCE(academic_year, 0) as academic_year, COALESCE(semester, 0) as semester " +
+                          "FROM sections WHERE created_by = ? ORDER BY academic_year DESC, semester, section_name";
             ps = conn.prepareStatement(query);
             ps.setInt(1, userId);
             rs = ps.executeQuery();
             
+            // First, load all sections
             while (rs.next()) {
-                SectionInfo section = new SectionInfo(
-                    rs.getInt("id"),
-                    rs.getString("section_name"),
-                    rs.getInt("total_students")
-                );
+                int sectionId = rs.getInt("id");
+                String sectionName = rs.getString("section_name");
+                int totalStudents = rs.getInt("total_students");
+                int academicYear = rs.getInt("academic_year");
+                int semester = rs.getInt("semester");
+                
+                SectionInfo section = new SectionInfo(sectionId, sectionName, totalStudents, academicYear, semester);
                 sections.add(section);
+                System.out.println("Loaded section: " + sectionName + " with " + totalStudents + " students (Year: " + academicYear + ", Sem: " + semester + ")");
             }
+            
+            // Close the first resultset before loading subjects
+            rs.close();
+            ps.close();
+            
+            // Now load subjects for each section (after ResultSet is closed)
+            for (SectionInfo section : sections) {
+                section.subjects = getSubjectsForSection(conn, section.id);
+            }
+            
+            System.out.println("Returning " + sections.size() + " sections for userId: " + userId);
             
         } catch (SQLException e) {
             System.err.println("Error in getSectionsByUser: " + e.getMessage());
@@ -750,12 +869,77 @@ public class SectionDAO {
             try {
                 if (rs != null) rs.close();
                 if (ps != null) ps.close();
-                closeConnection(conn);
+                // Don't close shared singleton connection
             } catch (SQLException e) {
                 e.printStackTrace();
             }
         }
+        
         return sections;
+    }
+    
+    // Helper method to get subjects for a section
+    private List<SubjectInfo> getSubjectsForSection(Connection conn, int sectionId) {
+        List<SubjectInfo> subjects = new ArrayList<>();
+        PreparedStatement ps = null;
+        ResultSet rs = null;
+        
+        try {
+            // Simplified query - just get subject names
+            String query = "SELECT s.subject_name " +
+                          "FROM section_subjects ss " +
+                          "JOIN subjects s ON ss.subject_id = s.id " +
+                          "WHERE ss.section_id = ?";
+            ps = conn.prepareStatement(query);
+            ps.setInt(1, sectionId);
+            rs = ps.executeQuery();
+            
+            while (rs.next()) {
+                String subjectName = rs.getString("subject_name");
+                // Use default values for total marks and credit
+                subjects.add(new SubjectInfo(subjectName, 100, 3));
+            }
+            
+            // If no subjects found, add a default one
+            if (subjects.isEmpty()) {
+                subjects.add(new SubjectInfo("General", 100, 3));
+            }
+            
+        } catch (SQLException e) {
+            System.err.println("Error loading subjects for section " + sectionId + ": " + e.getMessage());
+            // Return default subject if error
+            subjects.add(new SubjectInfo("General", 100, 3));
+        } finally {
+            try {
+                if (rs != null) rs.close();
+                if (ps != null) ps.close();
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
+        }
+        
+        return subjects;
+    }
+    
+    private void createSectionsTableIfNotExists(Connection conn) {
+        try {
+            String createTable = "CREATE TABLE IF NOT EXISTS sections (" +
+                "id INT AUTO_INCREMENT PRIMARY KEY, " +
+                "section_name VARCHAR(255) NOT NULL, " +
+                "total_students INT DEFAULT 0, " +
+                "created_by INT NOT NULL, " +
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP" +
+                ")";
+            
+            Statement stmt = conn.createStatement();
+            stmt.executeUpdate(createTable);
+            System.out.println("Sections table created successfully");
+            stmt.close();
+            
+        } catch (SQLException e) {
+            System.err.println("Error creating sections table: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
     
     public boolean deleteSection(int sectionId, int userId) {
@@ -975,5 +1159,37 @@ public class SectionDAO {
             }
         }
         return false;
+    }
+    
+    public int getSectionIdByName(String sectionName, int userId) {
+        Connection conn = null;
+        PreparedStatement ps = null;
+        ResultSet rs = null;
+        
+        try {
+            conn = DatabaseConnection.getConnection();
+            String query = "SELECT id FROM sections WHERE section_name = ? AND created_by = ? ORDER BY id DESC LIMIT 1";
+            ps = conn.prepareStatement(query);
+            ps.setString(1, sectionName);
+            ps.setInt(2, userId);
+            rs = ps.executeQuery();
+            
+            if (rs.next()) {
+                return rs.getInt("id");
+            }
+            
+        } catch (SQLException e) {
+            System.err.println("Error getting section ID: " + e.getMessage());
+            e.printStackTrace();
+        } finally {
+            try {
+                if (rs != null) rs.close();
+                if (ps != null) ps.close();
+                if (conn != null) conn.close();
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
+        }
+        return -1;
     }
 }

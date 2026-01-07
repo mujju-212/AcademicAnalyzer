@@ -20,7 +20,7 @@ import com.sms.dao.AnalyzerDAO;
 import org.jfree.chart.axis.CategoryAxis;
 import org.jfree.chart.axis.NumberAxis;
 
-public class SectionAnalyzer extends JDialog {
+public class SectionAnalyzer extends JPanel {
 
     // Modern color scheme - matching StudentAnalyzer
     private static final Color BACKGROUND_COLOR = new Color(245, 247, 250);
@@ -41,21 +41,36 @@ public class SectionAnalyzer extends JDialog {
     private List<SectionDAO.SectionInfo> availableSections;
     private int currentSectionId;
     private String currentSectionName;
+    private JFrame parentFrame;
+    private Runnable onCloseCallback;
 
+    // Constructor for standalone dialog (backward compatibility)
     public SectionAnalyzer(JFrame parent, HashMap<String, ArrayList<Student>> sectionStudents) {
-        super(parent, "Section Performance Analyzer", true);
+        this(parent, sectionStudents, null);
+        if (parent != null) {
+            JDialog dialog = new JDialog(parent, "Section Performance Analyzer", true);
+            dialog.setSize(1300, 750);
+            dialog.setLocationRelativeTo(parent);
+            dialog.setLayout(new BorderLayout());
+            dialog.getContentPane().setBackground(BACKGROUND_COLOR);
+            dialog.add(this, BorderLayout.CENTER);
+            dialog.setVisible(true);
+        }
+    }
+    
+    // Constructor for embedded panel
+    public SectionAnalyzer(JFrame parent, HashMap<String, ArrayList<Student>> sectionStudents, Runnable onCloseCallback) {
+        this.parentFrame = parent;
         this.sectionStudents = sectionStudents != null ? sectionStudents : new HashMap<>();
+        this.onCloseCallback = onCloseCallback;
         
         // Get sections from database
         loadSectionsFromDatabase();
         
-        setSize(1300, 750);
-        setLocationRelativeTo(parent);
         setLayout(new BorderLayout());
-        getContentPane().setBackground(BACKGROUND_COLOR);
+        setBackground(BACKGROUND_COLOR);
         
         initializeUI();
-        setVisible(true);
     }
 
     private void loadSectionsFromDatabase() {
@@ -88,11 +103,32 @@ public class SectionAnalyzer extends JDialog {
         // Title and tabs panel
         JPanel topPanel = new JPanel(new BorderLayout());
         topPanel.setOpaque(false);
+        
+        // Add back button if callback is present
+        if (onCloseCallback != null) {
+            JPanel leftPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+            leftPanel.setOpaque(false);
+            
+            JButton backButton = new JButton("← Back");
+            backButton.setFont(new Font("SansSerif", Font.BOLD, 14));
+            backButton.setForeground(PRIMARY_COLOR);
+            backButton.setBackground(CARD_COLOR);
+            backButton.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(PRIMARY_COLOR, 2),
+                BorderFactory.createEmptyBorder(5, 15, 5, 15)
+            ));
+            backButton.setFocusPainted(false);
+            backButton.setCursor(new Cursor(Cursor.HAND_CURSOR));
+            backButton.addActionListener(e -> closePanel());
+            
+            leftPanel.add(backButton);
+            topPanel.add(leftPanel, BorderLayout.WEST);
+        }
 
         JLabel titleLabel = new JLabel("SECTION PERFORMANCE ANALYZER");
         titleLabel.setFont(new Font("SansSerif", Font.BOLD, 26));
         titleLabel.setForeground(PRIMARY_COLOR);
-        topPanel.add(titleLabel, BorderLayout.WEST);
+        topPanel.add(titleLabel, onCloseCallback != null ? BorderLayout.CENTER : BorderLayout.WEST);
 
         // Section tabs
         JPanel tabsPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
@@ -133,7 +169,7 @@ public class SectionAnalyzer extends JDialog {
         sectionRadio = createModernRadioButton("Section", true);
         
         studentRadio.addActionListener(e -> {
-            dispose();
+            closePanel();
             HashMap<String, List<Student>> studentMap = new HashMap<>();
             if (currentSectionName != null) {
                 AnalyzerDAO analyzerDAO = new AnalyzerDAO();
@@ -889,6 +925,12 @@ public class SectionAnalyzer extends JDialog {
             if (c instanceof JToggleButton) {
                 c.repaint();
             }
+        }
+    }
+    
+    private void closePanel() {
+        if (onCloseCallback != null) {
+            onCloseCallback.run();
         }
     }
 }

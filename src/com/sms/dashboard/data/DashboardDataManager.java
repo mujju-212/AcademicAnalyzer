@@ -15,6 +15,11 @@ public class DashboardDataManager {
         loadDataFromDatabase();
     }
     
+    public DashboardDataManager(int userId) {
+        this.currentUserId = userId;
+        loadDataFromDatabase();
+    }
+    
     private void loadDataFromDatabase() {
         sectionStudents = new HashMap<>();
         

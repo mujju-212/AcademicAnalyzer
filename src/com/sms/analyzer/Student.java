@@ -4,6 +4,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 public class Student {
+    private int id; // Add student ID for database reference
     private String name;
     private String rollNumber;
     private Map<String, Integer> marks;
@@ -22,6 +23,15 @@ public class Student {
     
     public void setSection(String section) {
         this.section = section;
+    }
+    
+    // Add getter and setter for id
+    public int getId() {
+        return id;
+    }
+    
+    public void setId(int id) {
+        this.id = id;
     }
     
     // Existing getters

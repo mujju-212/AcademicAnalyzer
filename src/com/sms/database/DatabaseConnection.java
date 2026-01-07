@@ -5,11 +5,12 @@ import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import com.sms.util.ConfigLoader;
 
 public class DatabaseConnection {
-    private static final String URL = "jdbc:mysql://localhost:3306/academic_analyzer";
-    private static final String USERNAME = "root";
-    private static final String PASSWORD = "mk0492"; // Update with your password
+    private static final String URL = ConfigLoader.getDatabaseUrl();
+    private static final String USERNAME = ConfigLoader.getDatabaseUsername();
+    private static final String PASSWORD = ConfigLoader.getDatabasePassword();
     
     private static Connection connection = null;
     

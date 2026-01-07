@@ -11,7 +11,7 @@ import com.sms.dashboard.data.DashboardDataManager;
 import com.sms.dao.SectionDAO;
 import com.sms.dao.StudentDAO;
 
-public class StudentEntryDialog extends JDialog {
+public class StudentEntryDialog extends JPanel {
     private JPanel studentListPanel;
     private JTextField nameField;
     private JTextField rollField;
@@ -25,17 +25,19 @@ public class StudentEntryDialog extends JDialog {
     private Map<String, Integer> sectionIdMap;
     private JPanel totalStudentsLabel;
     private JPanel sectionStudentsLabel;
+    private Runnable onCloseCallback;
+    private JFrame parentFrame;
     
-    // Clean theme colors matching Create Section dialog
-    private Color backgroundColor = new Color(248, 249, 250);
+    // Clean theme colors matching Dashboard Constants
+    private Color backgroundColor = new Color(248, 250, 252);  // DashboardConstants.BACKGROUND_COLOR
     private Color cardBackground = Color.WHITE;
-    private Color primaryBlue = new Color(99, 102, 241);  // Indigo-500
-    private Color primaryGreen = new Color(34, 197, 94);   // Green-500
-    private Color textPrimary = new Color(17, 24, 39);     // Gray-900
-    private Color textSecondary = new Color(107, 114, 128); // Gray-500
-    private Color borderColor = new Color(229, 231, 235);   // Gray-200
-    private Color hoverColor = new Color(243, 244, 246);    // Gray-100
-    private Color errorColor = new Color(239, 68, 68);      // Red-500
+    private Color primaryBlue = new Color(99, 102, 241);      // DashboardConstants.PRIMARY_COLOR
+    private Color primaryGreen = new Color(34, 197, 94);       // DashboardConstants.SUCCESS_COLOR
+    private Color textPrimary = new Color(17, 24, 39);         // DashboardConstants.TEXT_PRIMARY
+    private Color textSecondary = new Color(75, 85, 99);       // DashboardConstants.TEXT_SECONDARY
+    private Color borderColor = new Color(229, 231, 235);      // Gray-200
+    private Color hoverColor = new Color(250, 250, 250);       // DashboardConstants.CARD_HOVER_BACKGROUND
+    private Color errorColor = new Color(220, 53, 69);         // DashboardConstants.ERROR_COLOR
 
     // Inner class to store student data
     private static class StudentEntry {
@@ -53,11 +55,13 @@ public class StudentEntryDialog extends JDialog {
     }
 
     public StudentEntryDialog(JFrame parent, DashboardDataManager dataManager) {
-        super(parent, "Student Management", true);
+        this(parent, dataManager, null);
+    }
+    
+    public StudentEntryDialog(JFrame parent, DashboardDataManager dataManager, Runnable onCloseCallback) {
+        this.parentFrame = parent;
         this.dataManager = dataManager;
-        setSize(1200, 800);
-        setLocationRelativeTo(parent);
-        setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
+        this.onCloseCallback = onCloseCallback;
         
         studentEntries = new ArrayList<>();
         sectionIdMap = new HashMap<>();
@@ -68,13 +72,13 @@ public class StudentEntryDialog extends JDialog {
 
     private void initializeUI() {
         setLayout(new BorderLayout());
-        getContentPane().setBackground(backgroundColor);
+        setBackground(backgroundColor);
         
         // Main container
         JPanel mainContainer = new JPanel(new BorderLayout());
         mainContainer.setBackground(backgroundColor);
         
-        // Header
+        // Header with back button
         mainContainer.add(createHeaderPanel(), BorderLayout.NORTH);
         
         // Content area
@@ -91,15 +95,32 @@ public class StudentEntryDialog extends JDialog {
             BorderFactory.createEmptyBorder(32, 40, 32, 40)
         ));
 
+        // Left side with back button and title
+        JPanel leftPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 20, 0));
+        leftPanel.setBackground(cardBackground);
+        
+        if (onCloseCallback != null) {
+            JButton backButton = new JButton("← Back");
+            backButton.setFont(new Font("Segoe UI", Font.PLAIN, 16));
+            backButton.setForeground(primaryBlue);
+            backButton.setBackground(cardBackground);
+            backButton.setBorderPainted(false);
+            backButton.setFocusPainted(false);
+            backButton.setCursor(new Cursor(Cursor.HAND_CURSOR));
+            backButton.addActionListener(e -> closePanel());
+            leftPanel.add(backButton);
+        }
+        
         // Title
         JLabel titleLabel = new JLabel("Student Management");
         titleLabel.setFont(new Font("Segoe UI", Font.PLAIN, 32));
         titleLabel.setForeground(textPrimary);
+        leftPanel.add(titleLabel);
 
         // Stats
         JPanel statsPanel = createStatsPanel();
 
-        header.add(titleLabel, BorderLayout.WEST);
+        header.add(leftPanel, BorderLayout.WEST);
         header.add(statsPanel, BorderLayout.EAST);
 
         return header;
@@ -148,7 +169,7 @@ public class StudentEntryDialog extends JDialog {
 
         // Left panel - Form
         JPanel leftPanel = createFormPanel();
-        leftPanel.setPreferredSize(new Dimension(450, 0));
+        leftPanel.setPreferredSize(new Dimension(550, 0));
 
         // Right panel - Student list
         JPanel rightPanel = createStudentListPanel();
@@ -357,7 +378,8 @@ public class StudentEntryDialog extends JDialog {
     private JTextField createStyledTextField() {
         JTextField field = new JTextField();
         field.setFont(new Font("Segoe UI", Font.PLAIN, 15));
-        field.setPreferredSize(new Dimension(400, 45));
+        field.setPreferredSize(new Dimension(420, 45));
+        field.setMaximumSize(new Dimension(420, 45));
         field.setBorder(BorderFactory.createCompoundBorder(
             BorderFactory.createLineBorder(borderColor, 1),
             BorderFactory.createEmptyBorder(10, 14, 10, 14)
@@ -390,7 +412,8 @@ public class StudentEntryDialog extends JDialog {
     private JComboBox<String> createStyledComboBox() {
         JComboBox<String> comboBox = new JComboBox<>();
         comboBox.setFont(new Font("Segoe UI", Font.PLAIN, 15));
-        comboBox.setPreferredSize(new Dimension(300, 45));
+        comboBox.setPreferredSize(new Dimension(420, 45));
+        comboBox.setMaximumSize(new Dimension(420, 45));
         comboBox.setBackground(cardBackground);
         comboBox.setForeground(textPrimary);
         comboBox.setBorder(BorderFactory.createLineBorder(borderColor, 1));
@@ -891,7 +914,7 @@ public class StudentEntryDialog extends JDialog {
             JOptionPane.showMessageDialog(this, message);
             
             if (successCount > 0 || skippedCount == studentEntries.size()) {
-                dispose();
+                closePanel();
             }
             
         } catch (Exception e) {
@@ -901,9 +924,9 @@ public class StudentEntryDialog extends JDialog {
     }
 
     private JDialog createProgressDialog() {
-        JDialog dialog = new JDialog(this, "Saving Students", true);
+        JDialog dialog = new JDialog(parentFrame, "Saving Students", true);
         dialog.setSize(400, 150);
-        dialog.setLocationRelativeTo(this);
+        dialog.setLocationRelativeTo(parentFrame);
         dialog.setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
 
         JPanel panel = new JPanel();
@@ -1052,7 +1075,7 @@ public class StudentEntryDialog extends JDialog {
 
     private void showTemporaryMessage(String message) {
         // Create a temporary notification
-        JWindow notification = new JWindow(this);
+        JWindow notification = new JWindow(parentFrame);
         JPanel panel = new JPanel(new BorderLayout());
         panel.setBackground(primaryGreen);
         panel.setBorder(BorderFactory.createEmptyBorder(10, 20, 10, 20));
@@ -1065,10 +1088,10 @@ public class StudentEntryDialog extends JDialog {
         notification.add(panel);
         notification.pack();
         
-        // Position at top center of dialog
-        Point dialogLocation = getLocationOnScreen();
-        int x = dialogLocation.x + (getWidth() - notification.getWidth()) / 2;
-        int y = dialogLocation.y + 50;
+        // Position at top center of parent frame
+        Point frameLocation = parentFrame.getLocationOnScreen();
+        int x = frameLocation.x + (parentFrame.getWidth() - notification.getWidth()) / 2;
+        int y = frameLocation.y + 50;
         notification.setLocation(x, y);
         
         notification.setVisible(true);
@@ -1077,6 +1100,12 @@ public class StudentEntryDialog extends JDialog {
         Timer timer = new Timer(2000, e -> notification.dispose());
         timer.setRepeats(false);
         timer.start();
+    }
+    
+    private void closePanel() {
+        if (onCloseCallback != null) {
+            onCloseCallback.run();
+        }
     }
 
     // Main method for testing

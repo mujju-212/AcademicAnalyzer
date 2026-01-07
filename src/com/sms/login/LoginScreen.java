@@ -461,7 +461,7 @@ public class LoginScreen extends JFrame {
                 // Check credentials in database
                 if (validateLogin(email, password)) {
                     dispose();
-                    new DashboardScreen();
+                    new DashboardScreen(currentUserId);
                 } else {
                     JOptionPane.showMessageDialog(this, 
                         "Invalid email or password", 

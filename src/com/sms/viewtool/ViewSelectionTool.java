@@ -32,8 +32,11 @@ import com.itextpdf.text.Paragraph;
 import com.itextpdf.text.pdf.PdfPTable;
 import com.itextpdf.text.pdf.PdfWriter;
 
-public class ViewSelectionTool extends JDialog {
+public class ViewSelectionTool extends JPanel {
 
+    private JFrame parentFrame;
+    private Runnable onCloseCallback;
+    
     // Custom rounded panel class
     static class RoundedPanel extends JPanel {
         private int cornerRadius;
@@ -136,23 +139,18 @@ public class ViewSelectionTool extends JDialog {
     private Map<Integer, SectionInfo> sectionInfoMap;
 
     public ViewSelectionTool(JFrame parent, HashMap<String, List<Student>> sectionStudents) {
-        super(parent, "View Student Data", true);
+        this(parent, sectionStudents, null);
+    }
+    
+    public ViewSelectionTool(JFrame parent, HashMap<String, List<Student>> sectionStudents, Runnable onCloseCallback) {
+        this.parentFrame = parent;
+        this.onCloseCallback = onCloseCallback;
         this.sectionStudents = (sectionStudents != null) ? sectionStudents : new HashMap<>();
         this.subjectCheckBoxes = new HashMap<>();
         this.sectionInfoMap = new HashMap<>();
         
-        // Get screen size and adjust dialog size accordingly
-        Dimension screenSize = Toolkit.getDefaultToolkit().getScreenSize();
-        int dialogHeight = Math.min(850, (int)(screenSize.height * 0.85)); // 85% of screen height max
-        int dialogWidth = Math.min(850, (int)(screenSize.width * 0.7)); // 70% of screen width max
-        
-        setSize(dialogWidth, dialogHeight);
-        setLocationRelativeTo(parent);
         setLayout(new BorderLayout());
-        setUndecorated(true);
-        
-        // Make it resizable by removing this line or setting to false
-        // setUndecorated(false); // This will show title bar with min/max buttons
+        setBackground(new Color(245, 247, 250));
         
         initializeUI();
     }
@@ -199,6 +197,19 @@ public class ViewSelectionTool extends JDialog {
         JPanel titlePanel = new JPanel(new BorderLayout());
         titlePanel.setOpaque(false);
         
+        // Add back button if callback present
+        if (onCloseCallback != null) {
+            JButton backButton = new JButton("← Back");
+            backButton.setFont(new java.awt.Font("Segoe UI", java.awt.Font.PLAIN, 14));
+            backButton.setForeground(new Color(99, 102, 241));
+            backButton.setBorderPainted(false);
+            backButton.setContentAreaFilled(false);
+            backButton.setFocusPainted(false);
+            backButton.setCursor(new Cursor(Cursor.HAND_CURSOR));
+            backButton.addActionListener(e -> closePanel());
+            titlePanel.add(backButton, BorderLayout.WEST);
+        }
+        
         JLabel titleLabel = new JLabel("View Student Data");
         titleLabel.setFont(new java.awt.Font("Arial", java.awt.Font.BOLD, 24)); // Reduced from 28
         titleLabel.setForeground(new Color(30, 30, 30));
@@ -210,9 +221,9 @@ public class ViewSelectionTool extends JDialog {
         closeButton.setContentAreaFilled(false);
         closeButton.setFocusPainted(false);
         closeButton.setCursor(new Cursor(Cursor.HAND_CURSOR));
-        closeButton.addActionListener(e -> dispose());
+        closeButton.addActionListener(e -> closePanel());
         
-        titlePanel.add(titleLabel, BorderLayout.WEST);
+        titlePanel.add(titleLabel, BorderLayout.CENTER);
         titlePanel.add(closeButton, BorderLayout.EAST);
         contentPanel.add(titlePanel, gbc);
         
@@ -1241,6 +1252,12 @@ public class ViewSelectionTool extends JDialog {
         
         ExtendedStudentData() {
             subjectMarks = new HashMap<>();
+        }
+    }
+    
+    private void closePanel() {
+        if (onCloseCallback != null) {
+            onCloseCallback.run();
         }
     }
     

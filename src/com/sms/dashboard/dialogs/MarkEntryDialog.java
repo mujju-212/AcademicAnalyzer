@@ -37,10 +37,12 @@ import java.io.*;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 
-public class MarkEntryDialog extends JDialog {
+public class MarkEntryDialog extends JPanel {
+    private JFrame parentFrame;
+    private Runnable onCloseCallback;
+    
     private JComboBox<String> sectionDropdown;
     private JComboBox<String> subjectDropdown;
-    private JComboBox<String> examTypeDropdown;
     private JTable marksTable;
     private DefaultTableModel tableModel;
     private JButton saveButton;
@@ -54,8 +56,25 @@ public class MarkEntryDialog extends JDialog {
     
     private Map<String, Integer> sectionIdMap;
     private Map<String, Integer> subjectIdMap;
-    private Map<String, Integer> examTypeIdMap;
     private Map<String, Integer> studentIdMap;
+    
+    // Store exam types with their max marks
+    private List<ExamTypeInfo> examTypes;
+    private boolean isCalculating = false; // Flag to prevent infinite recursion in calculateRowTotal
+    private boolean isLoadingData = false; // Flag to prevent auto-save during initial data load
+    
+    // Inner class to store exam type information
+    private static class ExamTypeInfo {
+        int id;
+        String name;
+        int maxMarks;
+        
+        ExamTypeInfo(int id, String name, int maxMarks) {
+            this.id = id;
+            this.name = name;
+            this.maxMarks = maxMarks;
+        }
+    }
     
     private ThemeManager themeManager;
     private int currentUserId;
@@ -78,13 +97,17 @@ public class MarkEntryDialog extends JDialog {
     private Color hoverColor = new Color(243, 244, 246);
     
     public MarkEntryDialog(JFrame parent) {
-        super(parent, "Mark Entry", true);
+        this(parent, null);
+    }
+    
+    public MarkEntryDialog(JFrame parent, Runnable onCloseCallback) {
+        this.parentFrame = parent;
+        this.onCloseCallback = onCloseCallback;
         this.currentUserId = com.sms.login.LoginScreen.currentUserId;
         this.themeManager = ThemeManager.getInstance();
         
-        setSize(1200, 800);
-        setLocationRelativeTo(parent);
         setLayout(new BorderLayout());
+        setBackground(backgroundColor);
         
         initializeMaps();
         initializeUI();
@@ -94,12 +117,12 @@ public class MarkEntryDialog extends JDialog {
     private void initializeMaps() {
         sectionIdMap = new HashMap<>();
         subjectIdMap = new HashMap<>();
-        examTypeIdMap = new HashMap<>();
         studentIdMap = new HashMap<>();
+        examTypes = new ArrayList<>();
     }
     
     private void initializeUI() {
-        getContentPane().setBackground(backgroundColor);
+        setBackground(backgroundColor);
         
         // Main container
         JPanel mainPanel = new JPanel(new BorderLayout());
@@ -125,6 +148,19 @@ public class MarkEntryDialog extends JDialog {
         // Title Section
         JPanel titleSection = new JPanel(new BorderLayout());
         titleSection.setBackground(cardBackground);
+        
+        // Add back button if callback present
+        if (onCloseCallback != null) {
+            JButton backButton = new JButton("← Back");
+            backButton.setFont(new java.awt.Font("Segoe UI", java.awt.Font.PLAIN, 14));
+            backButton.setForeground(primaryBlue);
+            backButton.setBackground(cardBackground);
+            backButton.setBorder(BorderFactory.createEmptyBorder(8, 16, 8, 16));
+            backButton.setFocusPainted(false);
+            backButton.setCursor(new Cursor(Cursor.HAND_CURSOR));
+            backButton.addActionListener(e -> closePanel());
+            titleSection.add(backButton, BorderLayout.WEST);
+        }
         
         JLabel titleLabel = new JLabel("Mark Entry");
         titleLabel.setFont(new java.awt.Font("Segoe UI", java.awt.Font.PLAIN, 32));
@@ -213,21 +249,11 @@ public class MarkEntryDialog extends JDialog {
         // Section Selection
         JPanel sectionPanel = createSelectionGroup("Section", createSectionDropdown());
         
-        // Subject Selection (NEW)
+        // Subject Selection
         JPanel subjectPanel = createSelectionGroup("Subject", createSubjectDropdown());
-        
-        // Exam Type Selection
-        JPanel examPanel = createSelectionGroup("Exam Type / Component", createExamTypeDropdown());
-        
-        // Load Button
-        JButton loadButton = createPrimaryButton("Load Students", primaryBlue);
-        loadButton.addActionListener(e -> loadStudentsAndMarks());
         
         selectionPanel.add(sectionPanel);
         selectionPanel.add(subjectPanel);
-        selectionPanel.add(examPanel);
-        selectionPanel.add(Box.createHorizontalStrut(20));
-        selectionPanel.add(loadButton);
         
         return selectionPanel;
     }
@@ -274,31 +300,7 @@ public class MarkEntryDialog extends JDialog {
         
         return sectionDropdown;
     }
-  
-    private JComboBox<String> createExamTypeDropdown() {
-        examTypeDropdown = new JComboBox<>();
-        examTypeDropdown.setFont(new java.awt.Font("Segoe UI", java.awt.Font.PLAIN, 15));
-        examTypeDropdown.setPreferredSize(new Dimension(300, 45));
-        examTypeDropdown.setBackground(cardBackground);
-        examTypeDropdown.setForeground(textPrimary);
-        examTypeDropdown.setBorder(BorderFactory.createLineBorder(borderColor, 1));
-        examTypeDropdown.setEnabled(false); // Initially disabled
-        
-        // Make sure it's focusable and clickable
-        examTypeDropdown.setFocusable(true);
-        examTypeDropdown.setRequestFocusEnabled(true);
-        
-        // Add initial item
-        examTypeDropdown.addItem("Select Exam Type");
-        
-        // Custom renderer
-        examTypeDropdown.setRenderer(createComboBoxRenderer());
-        
-        return examTypeDropdown;
-    }
       
-   
-    
     private DefaultListCellRenderer createComboBoxRenderer() {
         return new DefaultListCellRenderer() {
             @Override
@@ -421,12 +423,17 @@ public class MarkEntryDialog extends JDialog {
             }
         });
         
-        // Custom cell editor for marks
-        marksTable.setDefaultEditor(Object.class, createMarksEditor());
+        // Custom cell editor will be set in buildDynamicTable() method
+        // marksTable.setDefaultEditor(Object.class, createMarksEditor());  // OLD - commented out
         
         JScrollPane scrollPane = new JScrollPane(marksTable);
         scrollPane.setBorder(null);
         scrollPane.getViewport().setBackground(cardBackground);
+        
+        // Enable horizontal and vertical scrolling
+        scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+        scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
+        marksTable.setAutoResizeMode(JTable.AUTO_RESIZE_OFF); // Allow horizontal scrolling
         
         // Status bar
         JPanel statusBar = new JPanel(new BorderLayout());
@@ -436,7 +443,7 @@ public class MarkEntryDialog extends JDialog {
             BorderFactory.createEmptyBorder(12, 16, 12, 16)
         ));
         
-        statusLabel = new JLabel("Select section, subject and exam type to load students");
+        statusLabel = new JLabel("Select section and subject, then click Load Marks Grid");
         statusLabel.setFont(new java.awt.Font("Segoe UI", java.awt.Font.PLAIN, 14));
         statusLabel.setForeground(textSecondary);
         
@@ -462,6 +469,8 @@ public class MarkEntryDialog extends JDialog {
         return tablePanel;
     }
     
+    // OLD EDITOR - No longer used with grid design (custom editor created in buildDynamicTable)
+    /*
     private TableCellEditor createMarksEditor() {
         JTextField textField = new JTextField();
         textField.setFont(new java.awt.Font("Segoe UI", java.awt.Font.PLAIN, 14));
@@ -516,6 +525,7 @@ public class MarkEntryDialog extends JDialog {
         editor.setClickCountToStart(1);
         return editor;
     }
+    */
     
     private int extractMaxMarks(String examType) {
         if (examType == null) return 100;
@@ -566,7 +576,7 @@ public class MarkEntryDialog extends JDialog {
         actionPanel.setBackground(cardBackground);
         
         JButton cancelButton = createSecondaryButton("Cancel");
-        cancelButton.addActionListener(e -> dispose());
+        cancelButton.addActionListener(e -> closePanel());
         
         saveButton = createPrimaryButton("Save Marks", primaryGreen);
         saveButton.setEnabled(false);
@@ -601,6 +611,8 @@ public class MarkEntryDialog extends JDialog {
   
 
     // Let's also add a method to manually check what's happening
+    // OLD DEBUG METHOD - Commented out after grid redesign
+    /*
     private void debugDropdownState() {
         System.out.println("\n=== Dropdown State Debug ===");
         System.out.println("Section dropdown enabled: " + sectionDropdown.isEnabled());
@@ -618,8 +630,11 @@ public class MarkEntryDialog extends JDialog {
         }
         System.out.println("=== End Debug ===\n");
     }
+    */
 
 
+    // OLD METHOD - Commented out after grid redesign
+    /*
     private void loadTraditionalExamTypes() throws SQLException {
         try (Connection conn = DatabaseConnection.getConnection()) {
             // For traditional marking, load exam types from exam_types table
@@ -655,14 +670,23 @@ public class MarkEntryDialog extends JDialog {
             }
         }
     }
-
+    */
+    // OLD METHOD - Commented out after grid redesign
+    /*
     private void loadExamTypes() {
+        System.out.println("\n=== loadExamTypes called ===");
+        System.out.println("currentSectionId: " + currentSectionId);
+        System.out.println("currentSubjectId: " + currentSubjectId);
+        
         examTypeDropdown.removeAllItems();
         examTypeIdMap.clear();
         examTypeDropdown.addItem("Select Exam Type");
-        examTypeDropdown.setEnabled(false);
         
-        if (currentSectionId == null || currentSubjectId == null) return;
+        if (currentSectionId == null || currentSubjectId == null) {
+            System.out.println("Section or Subject ID is null, keeping dropdown disabled");
+            examTypeDropdown.setEnabled(false);
+            return;
+        }
         
         try (Connection conn = DatabaseConnection.getConnection()) {
             // First check if section uses flexible marking
@@ -678,6 +702,8 @@ public class MarkEntryDialog extends JDialog {
                 }
             }
             
+            System.out.println("Is flexible marking: " + isFlexible);
+            
             if (isFlexible) {
                 // Load components from marking scheme
                 loadFlexibleComponents(conn);
@@ -687,7 +713,9 @@ public class MarkEntryDialog extends JDialog {
             }
             
         } catch (SQLException e) {
+            System.err.println("Error loading exam types: " + e.getMessage());
             e.printStackTrace();
+            examTypeDropdown.setEnabled(false);
         }
     }
 
@@ -711,19 +739,34 @@ public class MarkEntryDialog extends JDialog {
                     
                     examTypeDropdown.addItem(componentName);
                     examTypeIdMap.put(componentName, componentId);
+                    System.out.println("Added flexible component: " + componentName + " (ID: " + componentId + ")");
                 }
-                examTypeDropdown.setEnabled(count > 0);
+                
+                System.out.println("Total flexible components loaded: " + count);
+                boolean shouldEnable = count > 0;
+                examTypeDropdown.setEnabled(shouldEnable);
+                System.out.println("Flexible exam type dropdown enabled: " + shouldEnable);
+                
+                if (shouldEnable) {
+                    // Force UI update
+                    examTypeDropdown.revalidate();
+                    examTypeDropdown.repaint();
+                }
             }
         }
     }
 
     private void loadTraditionalExamTypes(Connection conn) throws SQLException {
-        // Your existing exam types loading logic
-        String query = "SELECT id, exam_name FROM exam_types " +
-                       "WHERE section_id = ? ORDER BY id";
+        // Load exam types for the specific section and subject combination
+        String query = "SELECT DISTINCT et.id, et.exam_name " +
+                       "FROM exam_types et " +
+                       "INNER JOIN subject_exam_types set_table ON et.id = set_table.exam_type_id " +
+                       "WHERE set_table.section_id = ? AND set_table.subject_id = ? " +
+                       "ORDER BY et.id";
         
         try (PreparedStatement ps = conn.prepareStatement(query)) {
             ps.setInt(1, currentSectionId);
+            ps.setInt(2, currentSubjectId);
             
             try (ResultSet rs = ps.executeQuery()) {
                 int count = 0;
@@ -734,15 +777,27 @@ public class MarkEntryDialog extends JDialog {
                     
                     examTypeDropdown.addItem(examName);
                     examTypeIdMap.put(examName, examId);
+                    System.out.println("Added exam type: " + examName + " (ID: " + examId + ")");
                 }
-                examTypeDropdown.setEnabled(count > 0);
+                
+                System.out.println("Total exam types loaded: " + count);
+                boolean shouldEnable = count > 0;
+                examTypeDropdown.setEnabled(shouldEnable);
+                System.out.println("Exam type dropdown enabled: " + shouldEnable);
+                
+                if (shouldEnable) {
+                    // Force UI update
+                    examTypeDropdown.revalidate();
+                    examTypeDropdown.repaint();
+                }
             }
         }
     }
+    */
 
 
 
-// Also check the subject dropdown listener to ensure it's not disabling the exam type dropdown:
+// Subject dropdown now only loads grid data when button clicked
 private JComboBox<String> createSubjectDropdown() {
     subjectDropdown = new JComboBox<>();
     subjectDropdown.setFont(new java.awt.Font("Segoe UI", java.awt.Font.PLAIN, 15));
@@ -760,15 +815,8 @@ private JComboBox<String> createSubjectDropdown() {
             currentSubjectId = subjectIdMap.get(selected);
             System.out.println("Current Subject ID set to: " + currentSubjectId);
             
-            // Don't disable the exam type dropdown here
-            // Just load the exam types
-            loadExamTypes();
-            clearTable();
-        } else {
-            // Only disable if no subject is selected
-            examTypeDropdown.setEnabled(false);
-            examTypeDropdown.removeAllItems();
-            examTypeDropdown.addItem("Select Exam Type");
+            // Auto-load marks grid when subject is selected
+            loadMarksGrid();
         }
     });
     
@@ -777,7 +825,8 @@ private JComboBox<String> createSubjectDropdown() {
     return subjectDropdown;
 }
 
-// Add a debug method to check dropdown states:
+// Debug method - no longer needed but kept for reference
+    /*
 private void debugDropdownStates() {
     System.out.println("\n=== Dropdown States ===");
     System.out.println("Section dropdown:");
@@ -804,17 +853,15 @@ private void debugDropdownStates() {
     }
     System.out.println("===================\n");
 }
-
+    */
     // Also update the loadSubjects method to properly get subject IDs
     private void loadSubjects() {
         subjectDropdown.removeAllItems();
         subjectIdMap.clear();
-        examTypeDropdown.removeAllItems();
-        examTypeIdMap.clear();
+        examTypes.clear();
         
         if (currentSectionId == null) {
             subjectDropdown.setEnabled(false);
-            examTypeDropdown.setEnabled(false);
             return;
         }
         
@@ -850,7 +897,6 @@ private void debugDropdownStates() {
                     }
                     
                     subjectDropdown.setEnabled(hasSubjects);
-                    examTypeDropdown.setEnabled(false);
                     
                     if (!hasSubjects) {
                         System.out.println("No subjects found for section " + currentSectionId);
@@ -870,6 +916,9 @@ private void debugDropdownStates() {
         
         System.out.println("=== End Loading Subjects ===\n");
     }    
+    
+    // OLD METHOD - Commented out after grid redesign
+    /*
     private void loadFlexibleComponents(int markingSchemeId) throws SQLException {
         try (Connection conn = DatabaseConnection.getConnection()) {
             String query = "SELECT mc.id, mc.component_name, mc.actual_max_marks, " +
@@ -898,48 +947,208 @@ private void debugDropdownStates() {
             }
         }
     }
-    
+    */
   
-    private void loadStudentsAndMarks() {
-    	debugDropdownState();
-        
-     
-        String selectedSection = (String) sectionDropdown.getSelectedItem();
-        String selectedSubject = (String) subjectDropdown.getSelectedItem();
-        String selectedExam = (String) examTypeDropdown.getSelectedItem();
-        
-        if (selectedSection == null || selectedSection.equals("Select Section") ||
-            selectedSubject == null || selectedSubject.equals("Select Subject") ||
-            selectedExam == null || selectedExam.equals("Select Exam Type")) {
-            statusLabel.setText("Please select section, subject and exam type");
+    private void loadMarksGrid() {
+        if (currentSectionId == null || currentSubjectId == null) {
+            statusLabel.setText("Please select both section and subject");
             statusLabel.setForeground(primaryRed);
             return;
         }
         
-        Integer examTypeId = examTypeIdMap.get(selectedExam);
+        // Disable auto-save during data loading
+        isLoadingData = true;
         
-        // Clear table
-        tableModel.setRowCount(0);
+        // Load all exam types for this section and subject
+        loadExamTypesForGrid();
         
-        // Update column header with exam type info
-        String marksColumnHeader = "Marks (" + extractMaxMarks(selectedExam) + ")";
-        tableModel.setColumnIdentifiers(new String[]{"Roll No", "Student Name", marksColumnHeader});
+        if (examTypes.isEmpty()) {
+            JOptionPane.showMessageDialog(this, 
+                "No exam types configured for this section and subject.\nPlease configure exam patterns when creating the section.",
+                "No Exam Types", JOptionPane.WARNING_MESSAGE);
+            statusLabel.setText("No exam types configured");
+            statusLabel.setForeground(primaryOrange);
+            isLoadingData = false;
+            return;
+        }
         
-        // Load students
+        // Build dynamic table columns
+        buildDynamicTable();
+        
+        // Load students and their marks
+        loadStudentsWithAllMarks();
+        
+        // Re-enable auto-save after loading complete
+        isLoadingData = false;
+    }
+    
+    private void loadExamTypesForGrid() {
+        examTypes.clear();
+        
+        try (Connection conn = DatabaseConnection.getConnection()) {
+            // Check if flexible marking
+            String checkQuery = "SELECT marking_system FROM sections WHERE id = ?";
+            boolean isFlexible = false;
+            
+            try (PreparedStatement ps = conn.prepareStatement(checkQuery)) {
+                ps.setInt(1, currentSectionId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        isFlexible = "flexible".equals(rs.getString("marking_system"));
+                    }
+                }
+            }
+            
+            if (isFlexible) {
+                // Load flexible components
+                String query = "SELECT c.id, c.component_name, c.max_marks " +
+                             "FROM marking_components c " +
+                             "JOIN marking_schemes ms ON c.scheme_id = ms.id " +
+                             "WHERE ms.section_id = ? AND ms.subject_id = ? " +
+                             "ORDER BY c.sequence_order";
+                
+                try (PreparedStatement ps = conn.prepareStatement(query)) {
+                    ps.setInt(1, currentSectionId);
+                    ps.setInt(2, currentSubjectId);
+                    
+                    try (ResultSet rs = ps.executeQuery()) {
+                        while (rs.next()) {
+                            examTypes.add(new ExamTypeInfo(
+                                rs.getInt("id"),
+                                rs.getString("component_name"),
+                                rs.getInt("max_marks")
+                            ));
+                        }
+                    }
+                }
+            } else {
+                // Load traditional exam types
+                String query = "SELECT DISTINCT et.id, et.exam_name, et.weightage " +
+                             "FROM exam_types et " +
+                             "INNER JOIN subject_exam_types set_table ON et.id = set_table.exam_type_id " +
+                             "WHERE set_table.section_id = ? AND set_table.subject_id = ? " +
+                             "ORDER BY et.id";
+                
+                try (PreparedStatement ps = conn.prepareStatement(query)) {
+                    ps.setInt(1, currentSectionId);
+                    ps.setInt(2, currentSubjectId);
+                    
+                    try (ResultSet rs = ps.executeQuery()) {
+                        while (rs.next()) {
+                            examTypes.add(new ExamTypeInfo(
+                                rs.getInt("id"),
+                                rs.getString("exam_name"),
+                                rs.getInt("weightage")
+                            ));
+                        }
+                    }
+                }
+            }
+            
+        } catch (SQLException e) {
+            e.printStackTrace();
+            JOptionPane.showMessageDialog(this, "Error loading exam types: " + e.getMessage());
+        }
+    }
+    
+    private void buildDynamicTable() {
+        // Create column names: Roll No, Student Name, ExamType1(max), ExamType2(max), ..., Total, Status
+        List<String> columnNames = new ArrayList<>();
+        columnNames.add("Roll No");
+        columnNames.add("Student Name");
+        
+        for (ExamTypeInfo exam : examTypes) {
+            columnNames.add(exam.name + " (" + exam.maxMarks + ")");
+        }
+        
+        columnNames.add("Total");
+        columnNames.add("Status");
+        
+        // Create new table model
+        tableModel = new DefaultTableModel(columnNames.toArray(new String[0]), 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                // Only marks columns are editable (not Roll No, Name, Total, Status)
+                return column >= 2 && column < getColumnCount() - 2;
+            }
+        };
+        
+        marksTable.setModel(tableModel);
+        
+        // Set column widths
+        marksTable.getColumnModel().getColumn(0).setPreferredWidth(80);  // Roll No
+        marksTable.getColumnModel().getColumn(1).setPreferredWidth(150); // Student Name
+        
+        for (int i = 2; i < examTypes.size() + 2; i++) {
+            marksTable.getColumnModel().getColumn(i).setPreferredWidth(100); // Exam marks
+        }
+        
+        marksTable.getColumnModel().getColumn(examTypes.size() + 2).setPreferredWidth(80);  // Total
+        marksTable.getColumnModel().getColumn(examTypes.size() + 3).setPreferredWidth(100); // Status
+        
+        // Add custom cell editor for validation
+        for (int i = 0; i < examTypes.size(); i++) {
+            final int examIndex = i;
+            final int maxMarks = examTypes.get(i).maxMarks;
+            
+            marksTable.getColumnModel().getColumn(i + 2).setCellEditor(new DefaultCellEditor(new JTextField()) {
+                @Override
+                public boolean stopCellEditing() {
+                    String value = (String) getCellEditorValue();
+                    if (value.trim().isEmpty()) {
+                        return super.stopCellEditing();
+                    }
+                    
+                    try {
+                        double marks = Double.parseDouble(value);
+                        if (marks < 0 || marks > maxMarks) {
+                            JOptionPane.showMessageDialog(marksTable, 
+                                "Marks must be between 0 and " + maxMarks,
+                                "Invalid Marks", JOptionPane.ERROR_MESSAGE);
+                            return false;
+                        }
+                    } catch (NumberFormatException e) {
+                        JOptionPane.showMessageDialog(marksTable, 
+                            "Please enter a valid number",
+                            "Invalid Input", JOptionPane.ERROR_MESSAGE);
+                        return false;
+                    }
+                    
+                    return super.stopCellEditing();
+                }
+            });
+        }
+        
+        // Add table model listener to calculate totals and auto-save (only for exam columns)
+        tableModel.addTableModelListener(e -> {
+            if (e.getType() == javax.swing.event.TableModelEvent.UPDATE) {
+                int row = e.getFirstRow();
+                int column = e.getColumn();
+                
+                // Only trigger calculation for exam columns (between Student Name and Total)
+                // Skip if updating Total or Status columns to prevent infinite loop
+                if (row >= 0 && column >= 2 && column < examTypes.size() + 2) {
+                    calculateRowTotal(row);
+                    
+                    // Auto-save the mark that was just entered
+                    autoSaveMark(row, column);
+                }
+            }
+        });
+    }
+    
+    private void loadStudentsWithAllMarks() {
         try (Connection conn = DatabaseConnection.getConnection()) {
             String query = "SELECT s.id, s.roll_number, s.student_name " +
                           "FROM students s " +
-                          "JOIN sections sec ON s.section_id = sec.id " +
-                          "WHERE s.section_id = ? AND sec.created_by = ? " +
+                          "WHERE s.section_id = ? " +
                           "ORDER BY s.roll_number";
             
             try (PreparedStatement ps = conn.prepareStatement(query)) {
                 ps.setInt(1, currentSectionId);
-                ps.setInt(2, currentUserId);
                 
                 try (ResultSet rs = ps.executeQuery()) {
                     studentIdMap.clear();
-                    List<Object[]> rows = new ArrayList<>();
                     
                     while (rs.next()) {
                         int studentId = rs.getInt("id");
@@ -948,125 +1157,214 @@ private void debugDropdownStates() {
                         
                         studentIdMap.put(rollNumber, studentId);
                         
-                        Object[] row = new Object[]{rollNumber, studentName, ""};
-                        rows.add(row);
-                    }
-                    
-                    // Add rows to table
-                    for (Object[] row : rows) {
+                        // Create row with empty marks
+                        Object[] row = new Object[examTypes.size() + 4];
+                        row[0] = rollNumber;
+                        row[1] = studentName;
+                        
+                        // Initialize marks columns as empty
+                        for (int i = 0; i < examTypes.size(); i++) {
+                            row[i + 2] = "";
+                        }
+                        
+                        row[examTypes.size() + 2] = ""; // Total
+                        row[examTypes.size() + 3] = "Incomplete"; // Status
+                        
                         tableModel.addRow(row);
                     }
                     
                     // Load existing marks
-                    if (examTypeId != null) {
-                        if (isFlexibleMarking && examTypeId < 0) {
-                            loadExistingComponentMarks(Math.abs(examTypeId));
-                        } else {
-                            loadExistingTraditionalMarks(selectedExam);
-                        }
-                    }
-                    
-                    // Update UI
-                    updateStatistics(rows.size(), 1); // 1 subject selected
+                    loadExistingMarksForAllExams();
                     
                     // Enable buttons
                     saveButton.setEnabled(true);
                     importButton.setEnabled(true);
                     exportButton.setEnabled(true);
                     
-                    statusLabel.setText("Loaded " + rows.size() + " students for " + 
-                                      selectedSubject + " - " + selectedExam);
+                    statusLabel.setText("Loaded " + tableModel.getRowCount() + " students with " + examTypes.size() + " exam types");
                     statusLabel.setForeground(primaryGreen);
-                    
-                    // Force table refresh
-                    SwingUtilities.invokeLater(() -> {
-                        tableModel.fireTableDataChanged();
-                        marksTable.revalidate();
-                        marksTable.repaint();
-                    });
                 }
             }
             
         } catch (SQLException e) {
             e.printStackTrace();
             JOptionPane.showMessageDialog(this, "Error loading students: " + e.getMessage());
-            statusLabel.setText("Error loading students: " + e.getMessage());
-            statusLabel.setForeground(primaryRed);
         }
+    }
+    
+    private void loadExistingMarksForAllExams() {
+        // For each exam type, load existing marks
+        for (int examIndex = 0; examIndex < examTypes.size(); examIndex++) {
+            ExamTypeInfo exam = examTypes.get(examIndex);
+            
+            try (Connection conn = DatabaseConnection.getConnection()) {
+                // Query to get marks for this exam type
+                String query = "SELECT s.roll_number, m.marks " +
+                             "FROM marks m " +
+                             "JOIN students s ON m.student_id = s.id " +
+                             "WHERE m.exam_type_id = ? AND m.subject_id = ?";
+                
+                try (PreparedStatement ps = conn.prepareStatement(query)) {
+                    ps.setInt(1, exam.id);
+                    ps.setInt(2, currentSubjectId);
+                    
+                    try (ResultSet rs = ps.executeQuery()) {
+                        if (rs != null && rs.getMetaData().getColumnCount() > 0) {
+                            while (rs.next()) {
+                                String rollNumber = rs.getString("roll_number");
+                                double marks = rs.getDouble("marks");
+                                
+                                // Find student row and set marks
+                                for (int row = 0; row < tableModel.getRowCount(); row++) {
+                                    if (tableModel.getValueAt(row, 0).equals(rollNumber)) {
+                                        tableModel.setValueAt(String.valueOf(marks), row, examIndex + 2);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (SQLException e) {
+                // Silently handle - no existing marks is OK
+                System.err.println("Info: No existing marks found for exam type: " + exam.name);
+            }
+        }
+        
+        // Recalculate all totals
+        for (int row = 0; row < tableModel.getRowCount(); row++) {
+            calculateRowTotal(row);
+        }
+    }
+    
+    private void calculateRowTotal(int row) {
+        // Prevent re-entry to avoid infinite recursion
+        if (isCalculating) {
+            return;
+        }
+        
+        try {
+            isCalculating = true;
+            
+            double total = 0;
+            int filledCount = 0;
+            
+            for (int i = 0; i < examTypes.size(); i++) {
+                Object value = tableModel.getValueAt(row, i + 2);
+                if (value != null && !value.toString().trim().isEmpty()) {
+                    try {
+                        total += Double.parseDouble(value.toString());
+                        filledCount++;
+                    } catch (NumberFormatException e) {
+                        // Ignore invalid values
+                    }
+                }
+            }
+            
+            // Only show total if all exam types are filled
+            if (filledCount == examTypes.size()) {
+                tableModel.setValueAt(String.format("%.2f", total), row, examTypes.size() + 2);
+                tableModel.setValueAt("Complete", row, examTypes.size() + 3);
+            } else {
+                tableModel.setValueAt("", row, examTypes.size() + 2);
+                tableModel.setValueAt("Incomplete (" + filledCount + "/" + examTypes.size() + ")", row, examTypes.size() + 3);
+            }
+        } finally {
+            isCalculating = false;
+        }
+    }
+    
+    private void autoSaveMark(int row, int column) {
+        // Skip auto-save during initial data loading
+        if (isLoadingData) {
+            return;
+        }
+        
+        // Get student info
+        String rollNumber = (String) tableModel.getValueAt(row, 0);
+        Integer studentId = studentIdMap.get(rollNumber);
+        
+        if (studentId == null) {
+            return;
+        }
+        
+        // Get exam type info (column index - 2 because first 2 columns are Roll No and Name)
+        int examIndex = column - 2;
+        if (examIndex < 0 || examIndex >= examTypes.size()) {
+            return;
+        }
+        
+        ExamTypeInfo exam = examTypes.get(examIndex);
+        Object valueObj = tableModel.getValueAt(row, column);
+        String value = valueObj != null ? valueObj.toString().trim() : "";
+        
+        // Save in background thread to avoid blocking UI
+        SwingWorker<Void, Void> worker = new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                try (Connection conn = DatabaseConnection.getConnection()) {
+                    if (value.isEmpty()) {
+                        // Delete mark if value is empty
+                        String deleteQuery = "DELETE FROM marks WHERE student_id = ? AND exam_type_id = ? AND subject_id = ?";
+                        try (PreparedStatement ps = conn.prepareStatement(deleteQuery)) {
+                            ps.setInt(1, studentId);
+                            ps.setInt(2, exam.id);
+                            ps.setInt(3, currentSubjectId);
+                            ps.executeUpdate();
+                        }
+                    } else {
+                        // Delete existing mark first
+                        String deleteQuery = "DELETE FROM marks WHERE student_id = ? AND exam_type_id = ? AND subject_id = ?";
+                        try (PreparedStatement ps = conn.prepareStatement(deleteQuery)) {
+                            ps.setInt(1, studentId);
+                            ps.setInt(2, exam.id);
+                            ps.setInt(3, currentSubjectId);
+                            ps.executeUpdate();
+                        }
+                        
+                        // Insert new mark
+                        String insertQuery = "INSERT INTO marks (student_id, exam_type_id, subject_id, marks, created_by) VALUES (?, ?, ?, ?, ?)";
+                        try (PreparedStatement ps = conn.prepareStatement(insertQuery)) {
+                            ps.setInt(1, studentId);
+                            ps.setInt(2, exam.id);
+                            ps.setInt(3, currentSubjectId);
+                            ps.setDouble(4, Double.parseDouble(value));
+                            ps.setInt(5, currentUserId);
+                            ps.executeUpdate();
+                        }
+                    }
+                } catch (Exception e) {
+                    System.err.println("Auto-save error: " + e.getMessage());
+                    e.printStackTrace();
+                }
+                return null;
+            }
+            
+            @Override
+            protected void done() {
+                // Update status bar to show auto-saved
+                statusLabel.setText("✓ Auto-saved at " + new java.text.SimpleDateFormat("HH:mm:ss").format(new java.util.Date()));
+                statusLabel.setForeground(primaryGreen);
+            }
+        };
+        
+        worker.execute();
+    }
+    
+    // OLD METHODS - Commented out after grid redesign
+    /*
+    private void loadStudentsAndMarksOLD() {
+        // Full method body removed
     }
     
     private void loadExistingComponentMarks(int componentId) {
-        try (Connection conn = DatabaseConnection.getConnection()) {
-            String query = "SELECT s.roll_number, cm.marks_obtained " +
-                          "FROM component_marks cm " +
-                          "JOIN students s ON cm.student_id = s.id " +
-                          "WHERE s.section_id = ? AND cm.component_id = ?";
-            
-            try (PreparedStatement ps = conn.prepareStatement(query)) {
-                ps.setInt(1, currentSectionId);
-                ps.setInt(2, componentId);
-                
-                try (ResultSet rs = ps.executeQuery()) {
-                    Map<String, String> marksMap = new HashMap<>();
-                    
-                    while (rs.next()) {
-                        String rollNumber = rs.getString("roll_number");
-                        int marks = rs.getInt("marks_obtained");
-                        marksMap.put(rollNumber, marks == 0 ? "ABS" : String.valueOf(marks));
-                    }
-                    
-                    // Update table with existing marks
-                    for (int row = 0; row < tableModel.getRowCount(); row++) {
-                        String rollNumber = (String) tableModel.getValueAt(row, 0);
-                        String marks = marksMap.get(rollNumber);
-                        
-                        if (marks != null) {
-                            tableModel.setValueAt(marks, row, 2);
-                        }
-                    }
-                }
-            }
-        } catch (SQLException e) {
-            e.printStackTrace();
-        }
+        // Full method body removed
     }
     
     private void loadExistingTraditionalMarks(String examType) {
-        try (Connection conn = DatabaseConnection.getConnection()) {
-            String query = "SELECT s.roll_number, sm.marks_obtained " +
-                          "FROM student_marks sm " +
-                          "JOIN students s ON sm.student_id = s.id " +
-                          "WHERE s.section_id = ? AND sm.subject_id = ? AND sm.exam_type = ?";
-            
-            try (PreparedStatement ps = conn.prepareStatement(query)) {
-                ps.setInt(1, currentSectionId);
-                ps.setInt(2, currentSubjectId);
-                ps.setString(3, examType);
-                
-                try (ResultSet rs = ps.executeQuery()) {
-                    Map<String, String> marksMap = new HashMap<>();
-                    
-                    while (rs.next()) {
-                        String rollNumber = rs.getString("roll_number");
-                        int marks = rs.getInt("marks_obtained");
-                        marksMap.put(rollNumber, marks == 0 ? "ABS" : String.valueOf(marks));
-                    }
-                    
-                    // Update table with existing marks
-                    for (int row = 0; row < tableModel.getRowCount(); row++) {
-                        String rollNumber = (String) tableModel.getValueAt(row, 0);
-                        String marks = marksMap.get(rollNumber);
-                        
-                        if (marks != null) {
-                            tableModel.setValueAt(marks, row, 2);
-                        }
-                    }
-                }
-            }
-        } catch (SQLException e) {
-            e.printStackTrace();
-        }
+        // Full method body removed
     }
+    */
     
     // UI Update Methods
     private void updateStatistics(int studentCount, int subjectCount) {
@@ -1151,6 +1449,124 @@ private void debugDropdownStates() {
     
     // Save Methods
     private void saveMarks() {
+        if (examTypes.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "No exam types loaded!", "Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        
+        JDialog progressDialog = createProgressDialog("Saving all marks...");
+        
+        SwingWorker<Boolean, Void> worker = new SwingWorker<Boolean, Void>() {
+            private String errorMessage = null;
+            private int savedCount = 0;
+            
+            @Override
+            protected Boolean doInBackground() throws Exception {
+                Connection conn = null;
+                
+                try {
+                    conn = DatabaseConnection.getConnection();
+                    conn.setAutoCommit(false);
+                    
+                    // For each row (student)
+                    for (int row = 0; row < tableModel.getRowCount(); row++) {
+                        String rollNumber = (String) tableModel.getValueAt(row, 0);
+                        Integer studentId = studentIdMap.get(rollNumber);
+                        
+                        if (studentId == null) continue;
+                        
+                        // For each exam type
+                        for (int examIndex = 0; examIndex < examTypes.size(); examIndex++) {
+                            ExamTypeInfo exam = examTypes.get(examIndex);
+                            Object valueObj = tableModel.getValueAt(row, examIndex + 2);
+                            String value = valueObj != null ? valueObj.toString().trim() : "";
+                            
+                            if (!value.isEmpty()) {
+                                // Delete existing mark for this student, exam type, and subject
+                                String deleteQuery = "DELETE FROM marks WHERE student_id = ? AND exam_type_id = ? AND subject_id = ?";
+                                try (PreparedStatement ps = conn.prepareStatement(deleteQuery)) {
+                                    ps.setInt(1, studentId);
+                                    ps.setInt(2, exam.id);
+                                    ps.setInt(3, currentSubjectId);
+                                    ps.executeUpdate();
+                                }
+                                
+                                // Insert new mark
+                                String insertQuery = "INSERT INTO marks (student_id, exam_type_id, subject_id, marks, created_by) VALUES (?, ?, ?, ?, ?)";
+                                try (PreparedStatement ps = conn.prepareStatement(insertQuery)) {
+                                    ps.setInt(1, studentId);
+                                    ps.setInt(2, exam.id);
+                                    ps.setInt(3, currentSubjectId);
+                                    ps.setDouble(4, Double.parseDouble(value));
+                                    ps.setInt(5, currentUserId);
+                                    ps.executeUpdate();
+                                    savedCount++;
+                                }
+                            }
+                        }
+                    }
+                    
+                    conn.commit();
+                    return true;
+                    
+                } catch (Exception e) {
+                    if (conn != null) {
+                        try {
+                            conn.rollback();
+                        } catch (SQLException ex) {
+                            ex.printStackTrace();
+                        }
+                    }
+                    errorMessage = e.getMessage();
+                    e.printStackTrace();
+                    return false;
+                } finally {
+                    if (conn != null) {
+                        try {
+                            conn.setAutoCommit(true);
+                            conn.close();
+                        } catch (SQLException e) {
+                            e.printStackTrace();
+                        }
+                    }
+                }
+            }
+            
+            @Override
+            protected void done() {
+                progressDialog.dispose();
+                
+                try {
+                    if (get()) {
+                        statusLabel.setText("✓ Bulk save complete: " + savedCount + " marks saved at " + new SimpleDateFormat("HH:mm:ss").format(new Date()));
+                        statusLabel.setForeground(primaryGreen);
+                        lastSavedLabel.setText("Last saved: " + new SimpleDateFormat("MMM dd, yyyy HH:mm").format(new Date()));
+                        
+                        JOptionPane.showMessageDialog(MarkEntryDialog.this, 
+                            "Bulk save successful!\nSaved " + savedCount + " marks to database.",
+                            "Success", 
+                            JOptionPane.INFORMATION_MESSAGE);
+                    } else {
+                        statusLabel.setText("Error saving marks");
+                        statusLabel.setForeground(primaryRed);
+                        JOptionPane.showMessageDialog(MarkEntryDialog.this, 
+                            "Error saving marks: " + errorMessage,
+                            "Error", 
+                            JOptionPane.ERROR_MESSAGE);
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+        };
+        
+        worker.execute();
+        progressDialog.setVisible(true);
+    }
+    
+    // OLD METHODS - Commented out after grid redesign
+    /*
+    private void saveMarksOLD() {
         String selectedExam = (String) examTypeDropdown.getSelectedItem();
         Integer examTypeId = examTypeIdMap.get(selectedExam);
         
@@ -1205,245 +1621,13 @@ private void debugDropdownStates() {
     }
     
     private void saveFlexibleComponentMarks(int componentId) {
-        JDialog progressDialog = createProgressDialog("Saving component marks...");
-        
-        SwingWorker<Boolean, Void> worker = new SwingWorker<Boolean, Void>() {
-            private String errorMessage = null;
-            private int savedCount = 0;
-            
-            @Override
-            protected Boolean doInBackground() throws Exception {
-                Connection conn = null;
-                PreparedStatement ps = null;
-                
-                try {
-                    conn = DatabaseConnection.getConnection();
-                    conn.setAutoCommit(false);
-                    
-                    // Delete existing marks
-                    String deleteQuery = "DELETE cm FROM component_marks cm " +
-                                       "JOIN students s ON cm.student_id = s.id " +
-                                       "WHERE cm.component_id = ? AND s.section_id = ?";
-                    ps = conn.prepareStatement(deleteQuery);
-                    ps.setInt(1, componentId);
-                    ps.setInt(2, currentSectionId);
-                    ps.executeUpdate();
-                    ps.close();
-                    
-                    // Insert new marks
-                    String insertQuery = "INSERT INTO component_marks " +
-                                       "(student_id, component_id, marks_obtained, created_by) " +
-                                       "VALUES (?, ?, ?, ?)";
-                    ps = conn.prepareStatement(insertQuery);
-                    
-                    for (int row = 0; row < tableModel.getRowCount(); row++) {
-                        String rollNumber = (String) tableModel.getValueAt(row, 0);
-                        Integer studentId = studentIdMap.get(rollNumber);
-                        
-                        if (studentId == null) continue;
-                        
-                        Object valueObj = tableModel.getValueAt(row, 2);
-                        String value = valueObj != null ? valueObj.toString().trim() : "";
-                        
-                        if (!value.isEmpty()) {
-                            ps.setInt(1, studentId);
-                            ps.setInt(2, componentId);
-                            
-                            if (value.equalsIgnoreCase("ABS")) {
-                                ps.setInt(3, 0);
-                            } else {
-                                ps.setInt(3, Integer.parseInt(value));
-                            }
-                            
-                            ps.setInt(4, currentUserId);
-                            ps.addBatch();
-                            savedCount++;
-                        }
-                    }
-                    
-                    ps.executeBatch();
-                    conn.commit();
-                    return true;
-                    
-                } catch (Exception e) {
-                    errorMessage = e.getMessage();
-                    e.printStackTrace();
-                    if (conn != null) {
-                        try {
-                            conn.rollback();
-                        } catch (SQLException ex) 
-                        {
-                            ex.printStackTrace();
-                        }
-                    }
-                    return false;
-                } finally {
-                    if (ps != null) try { ps.close(); } catch (SQLException e) { }
-                    if (conn != null) {
-                        try {
-                            conn.setAutoCommit(true);
-                            conn.close();
-                        } catch (SQLException e) { }
-                    }
-                }
-            }
-            
-            @Override
-            protected void done() {
-                progressDialog.dispose();
-                
-                try {
-                    boolean success = get();
-                    if (success) {
-                        String timestamp = new SimpleDateFormat("HH:mm").format(new Date());
-                        lastSavedLabel.setText(timestamp);
-                        
-                        showSuccessNotification("Successfully saved " + savedCount + " component marks!");
-                        
-                        statusLabel.setText("Component marks saved successfully at " + timestamp);
-                        statusLabel.setForeground(primaryGreen);
-                    } else {
-                        JOptionPane.showMessageDialog(MarkEntryDialog.this, 
-                            "Error saving marks: " + (errorMessage != null ? errorMessage : "Unknown error"), 
-                            "Error", 
-                            JOptionPane.ERROR_MESSAGE);
-                    }
-                } catch (Exception e) {
-                    e.printStackTrace();
-                    JOptionPane.showMessageDialog(MarkEntryDialog.this, 
-                        "Error: " + e.getMessage(), 
-                        "Error", 
-                        JOptionPane.ERROR_MESSAGE);
-                }
-            }
-        };
-        
-        worker.execute();
-        progressDialog.setVisible(true);
+        // ... rest of method
     }
     
     private void saveTraditionalMarks(String examType) {
-        JDialog progressDialog = createProgressDialog("Saving marks...");
-        
-        SwingWorker<Boolean, Void> worker = new SwingWorker<Boolean, Void>() {
-            private String errorMessage = null;
-            private int savedCount = 0;
-            
-            @Override
-            protected Boolean doInBackground() throws Exception {
-                Connection conn = null;
-                PreparedStatement ps = null;
-                
-                try {
-                    conn = DatabaseConnection.getConnection();
-                    conn.setAutoCommit(false);
-                    
-                    // Delete existing marks
-                    String deleteQuery = "DELETE sm FROM student_marks sm " +
-                                       "JOIN students s ON sm.student_id = s.id " +
-                                       "WHERE sm.exam_type = ? AND s.section_id = ? " +
-                                       "AND sm.subject_id = ?";
-                    ps = conn.prepareStatement(deleteQuery);
-                    ps.setString(1, examType);
-                    ps.setInt(2, currentSectionId);
-                    ps.setInt(3, currentSubjectId);
-                    ps.executeUpdate();
-                    ps.close();
-                    
-                    // Insert new marks
-                    String insertQuery = "INSERT INTO student_marks " +
-                                       "(student_id, subject_id, marks_obtained, exam_type, " +
-                                       "academic_year, created_by) VALUES (?, ?, ?, ?, ?, ?)";
-                    ps = conn.prepareStatement(insertQuery);
-                    
-                    String currentYear = String.valueOf(Calendar.getInstance().get(Calendar.YEAR));
-                    
-                    for (int row = 0; row < tableModel.getRowCount(); row++) {
-                        String rollNumber = (String) tableModel.getValueAt(row, 0);
-                        Integer studentId = studentIdMap.get(rollNumber);
-                        
-                        if (studentId == null) continue;
-                        
-                        Object valueObj = tableModel.getValueAt(row, 2);
-                        String value = valueObj != null ? valueObj.toString().trim() : "";
-                        
-                        if (!value.isEmpty()) {
-                            ps.setInt(1, studentId);
-                            ps.setInt(2, currentSubjectId);
-                            
-                            if (value.equalsIgnoreCase("ABS")) {
-                                ps.setInt(3, 0);
-                            } else {
-                                ps.setInt(3, Integer.parseInt(value));
-                            }
-                            
-                            ps.setString(4, examType);
-                            ps.setString(5, currentYear);
-                            ps.setInt(6, currentUserId);
-                            ps.addBatch();
-                            savedCount++;
-                        }
-                    }
-                    
-                    ps.executeBatch();
-                    conn.commit();
-                    return true;
-                    
-                } catch (Exception e) {
-                    errorMessage = e.getMessage();
-                    e.printStackTrace();
-                    if (conn != null) {
-                        try {
-                            conn.rollback();
-                        } catch (SQLException ex) {
-                            ex.printStackTrace();
-                        }
-                    }
-                    return false;
-                } finally {
-                    if (ps != null) try { ps.close(); } catch (SQLException e) { }
-                    if (conn != null) {
-                        try {
-                            conn.setAutoCommit(true);
-                            conn.close();
-                        } catch (SQLException e) { }
-                    }
-                }
-            }
-            
-            @Override
-            protected void done() {
-                progressDialog.dispose();
-                
-                try {
-                    boolean success = get();
-                    if (success) {
-                        String timestamp = new SimpleDateFormat("HH:mm").format(new Date());
-                        lastSavedLabel.setText(timestamp);
-                        
-                        showSuccessNotification("Successfully saved " + savedCount + " marks!");
-                        
-                        statusLabel.setText("Marks saved successfully at " + timestamp);
-                        statusLabel.setForeground(primaryGreen);
-                    } else {
-                        JOptionPane.showMessageDialog(MarkEntryDialog.this, 
-                            "Error saving marks: " + (errorMessage != null ? errorMessage : "Unknown error"), 
-                            "Error", 
-                            JOptionPane.ERROR_MESSAGE);
-                    }
-                } catch (Exception e) {
-                    e.printStackTrace();
-                    JOptionPane.showMessageDialog(MarkEntryDialog.this, 
-                        "Error: " + e.getMessage(), 
-                        "Error", 
-                        JOptionPane.ERROR_MESSAGE);
-                }
-            }
-        };
-        
-        worker.execute();
-        progressDialog.setVisible(true);
+        // ... rest of method
     }
+    */
     
     // UI Component Creation Methods
     private JButton createPrimaryButton(String text, Color bgColor) {
@@ -1563,9 +1747,9 @@ private void debugDropdownStates() {
     }
     
     private JDialog createProgressDialog(String message) {
-        JDialog dialog = new JDialog(this, "Processing", true);
+        JDialog dialog = new JDialog(parentFrame, "Processing", true);
         dialog.setSize(300, 120);
-        dialog.setLocationRelativeTo(this);
+        dialog.setLocationRelativeTo(parentFrame);
         dialog.setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
         
         JPanel panel = new JPanel();
@@ -1591,7 +1775,7 @@ private void debugDropdownStates() {
     
     private void showSuccessNotification(String message) {
         // Create a temporary notification
-        JWindow notification = new JWindow(this);
+        JWindow notification = new JWindow(parentFrame);
         JPanel panel = new JPanel(new BorderLayout());
         panel.setBackground(primaryGreen);
         panel.setBorder(BorderFactory.createEmptyBorder(12, 20, 12, 20));
@@ -1604,10 +1788,10 @@ private void debugDropdownStates() {
         notification.add(panel);
         notification.pack();
         
-        // Position at top center of dialog
-        Point dialogLocation = getLocationOnScreen();
-        int x = dialogLocation.x + (getWidth() - notification.getWidth()) / 2;
-        int y = dialogLocation.y + 100;
+        // Position at top center of parent frame
+        Point frameLocation = parentFrame.getLocationOnScreen();
+        int x = frameLocation.x + (parentFrame.getWidth() - notification.getWidth()) / 2;
+        int y = frameLocation.y + 100;
         notification.setLocation(x, y);
         
         notification.setVisible(true);
@@ -1618,19 +1802,503 @@ private void debugDropdownStates() {
         timer.start();
     }
     
-    // Import/Export Methods (simplified for brevity)
+    // Import/Export Methods
     private void showImportDialog() {
-        JOptionPane.showMessageDialog(this, 
-            "Import functionality will be implemented based on the new structure", 
-            "Import", 
-            JOptionPane.INFORMATION_MESSAGE);
+        if (currentSectionId == null || currentSubjectId == null || examTypes.isEmpty()) {
+            JOptionPane.showMessageDialog(this, 
+                "Please select section and subject first", 
+                "Selection Required", 
+                JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        
+        JFileChooser fileChooser = new JFileChooser();
+        fileChooser.setDialogTitle("Import Marks from Excel");
+        fileChooser.setFileFilter(new FileNameExtensionFilter("Excel Files (*.xlsx, *.xls)", "xlsx", "xls"));
+        
+        if (fileChooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
+            File selectedFile = fileChooser.getSelectedFile();
+            importMarksFromExcel(selectedFile);
+        }
+    }
+    
+    private void importMarksFromExcel(File file) {
+        JDialog progressDialog = createProgressDialog("Importing marks...");
+        
+        SwingWorker<Boolean, Void> worker = new SwingWorker<Boolean, Void>() {
+            private String errorMessage = null;
+            private int importedCount = 0;
+            
+            @Override
+            protected Boolean doInBackground() throws Exception {
+                try (FileInputStream fis = new FileInputStream(file)) {
+                    Workbook workbook = null;
+                    
+                    // Determine file type
+                    String fileName = file.getName().toLowerCase();
+                    if (fileName.endsWith(".xlsx")) {
+                        workbook = new XSSFWorkbook(fis);
+                    } else if (fileName.endsWith(".xls")) {
+                        workbook = new HSSFWorkbook(fis);
+                    } else {
+                        errorMessage = "Unsupported file format";
+                        return false;
+                    }
+                    
+                    Sheet sheet = workbook.getSheetAt(0);
+                    
+                    // Read header row to match exam types
+                    Row headerRow = sheet.getRow(0);
+                    if (headerRow == null) {
+                        errorMessage = "Invalid Excel format: No header row";
+                        return false;
+                    }
+                    
+                    // Map column indices to exam types
+                    Map<Integer, Integer> columnToExamIndex = new HashMap<>();
+                    for (int col = 2; col < headerRow.getLastCellNum(); col++) {
+                        Cell cell = headerRow.getCell(col);
+                        if (cell != null) {
+                            String headerText = cell.getStringCellValue().trim();
+                            // Find matching exam type
+                            for (int i = 0; i < examTypes.size(); i++) {
+                                if (examTypes.get(i).name.equals(headerText)) {
+                                    columnToExamIndex.put(col, i);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Read data rows
+                    for (int rowIndex = 1; rowIndex <= sheet.getLastRowNum(); rowIndex++) {
+                        Row dataRow = sheet.getRow(rowIndex);
+                        if (dataRow == null) continue;
+                        
+                        // Get roll number from first column
+                        Cell rollCell = dataRow.getCell(0);
+                        if (rollCell == null) continue;
+                        
+                        String rollNumber = getCellValueAsString(rollCell).trim();
+                        if (rollNumber.isEmpty()) continue;
+                        
+                        // Find matching row in table
+                        int tableRow = -1;
+                        for (int r = 0; r < tableModel.getRowCount(); r++) {
+                            if (tableModel.getValueAt(r, 0).equals(rollNumber)) {
+                                tableRow = r;
+                                break;
+                            }
+                        }
+                        
+                        if (tableRow == -1) continue; // Student not found
+                        
+                        // Import marks for each exam type
+                        for (Map.Entry<Integer, Integer> entry : columnToExamIndex.entrySet()) {
+                            int col = entry.getKey();
+                            int examIndex = entry.getValue();
+                            
+                            Cell markCell = dataRow.getCell(col);
+                            if (markCell != null) {
+                                String value = getCellValueAsString(markCell).trim();
+                                if (!value.isEmpty()) {
+                                    tableModel.setValueAt(value, tableRow, examIndex + 2);
+                                    importedCount++;
+                                }
+                            }
+                        }
+                    }
+                    
+                    workbook.close();
+                    return true;
+                    
+                } catch (Exception e) {
+                    errorMessage = e.getMessage();
+                    e.printStackTrace();
+                    return false;
+                }
+            }
+            
+            @Override
+            protected void done() {
+                progressDialog.dispose();
+                
+                try {
+                    if (get()) {
+                        showSuccessNotification("Imported " + importedCount + " marks successfully!");
+                        statusLabel.setText("Imported " + importedCount + " marks");
+                        statusLabel.setForeground(primaryGreen);
+                    } else {
+                        JOptionPane.showMessageDialog(MarkEntryDialog.this, 
+                            "Import failed: " + errorMessage, 
+                            "Import Error", 
+                            JOptionPane.ERROR_MESSAGE);
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+        };
+        
+        worker.execute();
+        progressDialog.setVisible(true);
+    }
+    
+    private String getCellValueAsString(Cell cell) {
+        if (cell == null) return "";
+        
+        switch (cell.getCellType()) {
+            case STRING:
+                return cell.getStringCellValue();
+            case NUMERIC:
+                if (DateUtil.isCellDateFormatted(cell)) {
+                    return cell.getDateCellValue().toString();
+                } else {
+                    double numValue = cell.getNumericCellValue();
+                    if (numValue == (long) numValue) {
+                        return String.valueOf((long) numValue);
+                    } else {
+                        return String.valueOf(numValue);
+                    }
+                }
+            case BOOLEAN:
+                return String.valueOf(cell.getBooleanCellValue());
+            case FORMULA:
+                return cell.getCellFormula();
+            case BLANK:
+                return "";
+            default:
+                return "";
+        }
     }
     
     private void showExportDialog() {
-        JOptionPane.showMessageDialog(this, 
-            "Export functionality will be implemented based on the new structure", 
-            "Export", 
-            JOptionPane.INFORMATION_MESSAGE);
+        if (tableModel.getRowCount() == 0) {
+            JOptionPane.showMessageDialog(this, 
+                "No data to export", 
+                "Export", 
+                JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        
+        String[] options = {"Excel (.xlsx)", "Excel (.xls)", "PDF", "Cancel"};
+        int choice = JOptionPane.showOptionDialog(this,
+            "Select export format:",
+            "Export Marks",
+            JOptionPane.DEFAULT_OPTION,
+            JOptionPane.QUESTION_MESSAGE,
+            null,
+            options,
+            options[0]);
+        
+        if (choice == 3 || choice == JOptionPane.CLOSED_OPTION) {
+            return; // User cancelled
+        }
+        
+        JFileChooser fileChooser = new JFileChooser();
+        fileChooser.setDialogTitle("Export Marks");
+        
+        String extension = "";
+        String description = "";
+        
+        switch (choice) {
+            case 0:
+                extension = "xlsx";
+                description = "Excel 2007+ (*.xlsx)";
+                break;
+            case 1:
+                extension = "xls";
+                description = "Excel 97-2003 (*.xls)";
+                break;
+            case 2:
+                extension = "pdf";
+                description = "PDF Document (*.pdf)";
+                break;
+        }
+        
+        fileChooser.setFileFilter(new FileNameExtensionFilter(description, extension));
+        
+        // Suggest filename
+        String sectionName = (String) sectionDropdown.getSelectedItem();
+        String subjectName = (String) subjectDropdown.getSelectedItem();
+        String suggestedName = "Marks_" + sectionName + "_" + subjectName + "_" + 
+                               new SimpleDateFormat("yyyyMMdd").format(new Date()) + "." + extension;
+        fileChooser.setSelectedFile(new File(suggestedName));
+        
+        if (fileChooser.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
+            File selectedFile = fileChooser.getSelectedFile();
+            
+            // Ensure correct extension
+            if (!selectedFile.getName().toLowerCase().endsWith("." + extension)) {
+                selectedFile = new File(selectedFile.getAbsolutePath() + "." + extension);
+            }
+            
+            if (choice == 2) {
+                exportToPDF(selectedFile);
+            } else {
+                exportToExcel(selectedFile, choice == 0);
+            }
+        }
+    }
+    
+    private void exportToExcel(File file, boolean isXlsx) {
+        JDialog progressDialog = createProgressDialog("Exporting to Excel...");
+        
+        SwingWorker<Boolean, Void> worker = new SwingWorker<Boolean, Void>() {
+            private String errorMessage = null;
+            
+            @Override
+            protected Boolean doInBackground() throws Exception {
+                Workbook workbook = null;
+                FileOutputStream fos = null;
+                
+                try {
+                    // Create workbook
+                    workbook = isXlsx ? new XSSFWorkbook() : new HSSFWorkbook();
+                    Sheet sheet = workbook.createSheet("Marks");
+                    
+                    // Create styles
+                    CellStyle headerStyle = workbook.createCellStyle();
+                    Font headerFont = workbook.createFont();
+                    headerFont.setBold(true);
+                    headerFont.setFontHeightInPoints((short) 12);
+                    headerStyle.setFont(headerFont);
+                    headerStyle.setFillForegroundColor(IndexedColors.GREY_25_PERCENT.getIndex());
+                    headerStyle.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+                    headerStyle.setBorderBottom(BorderStyle.THIN);
+                    headerStyle.setBorderTop(BorderStyle.THIN);
+                    headerStyle.setBorderLeft(BorderStyle.THIN);
+                    headerStyle.setBorderRight(BorderStyle.THIN);
+                    headerStyle.setAlignment(HorizontalAlignment.CENTER);
+                    
+                    CellStyle dataStyle = workbook.createCellStyle();
+                    dataStyle.setBorderBottom(BorderStyle.THIN);
+                    dataStyle.setBorderTop(BorderStyle.THIN);
+                    dataStyle.setBorderLeft(BorderStyle.THIN);
+                    dataStyle.setBorderRight(BorderStyle.THIN);
+                    
+                    // Create title row
+                    Row titleRow = sheet.createRow(0);
+                    Cell titleCell = titleRow.createCell(0);
+                    titleCell.setCellValue("Mark Entry - " + sectionDropdown.getSelectedItem() + 
+                                          " - " + subjectDropdown.getSelectedItem());
+                    Font titleFont = workbook.createFont();
+                    titleFont.setBold(true);
+                    titleFont.setFontHeightInPoints((short) 14);
+                    CellStyle titleStyle = workbook.createCellStyle();
+                    titleStyle.setFont(titleFont);
+                    titleCell.setCellStyle(titleStyle);
+                    
+                    // Merge title cells
+                    sheet.addMergedRegion(new CellRangeAddress(0, 0, 0, tableModel.getColumnCount() - 1));
+                    
+                    // Create header row
+                    Row headerRow = sheet.createRow(2);
+                    for (int col = 0; col < tableModel.getColumnCount(); col++) {
+                        Cell cell = headerRow.createCell(col);
+                        cell.setCellValue(tableModel.getColumnName(col));
+                        cell.setCellStyle(headerStyle);
+                        
+                        // Auto-size columns
+                        sheet.setColumnWidth(col, 15 * 256);
+                    }
+                    
+                    // Create data rows
+                    for (int row = 0; row < tableModel.getRowCount(); row++) {
+                        Row dataRow = sheet.createRow(row + 3);
+                        
+                        for (int col = 0; col < tableModel.getColumnCount(); col++) {
+                            Cell cell = dataRow.createCell(col);
+                            Object value = tableModel.getValueAt(row, col);
+                            
+                            if (value != null) {
+                                String strValue = value.toString();
+                                
+                                // Try to parse as number if possible
+                                if (col >= 2 && col < tableModel.getColumnCount() - 2) { // Mark columns
+                                    try {
+                                        if (!strValue.equalsIgnoreCase("ABS") && !strValue.isEmpty()) {
+                                            double numValue = Double.parseDouble(strValue);
+                                            cell.setCellValue(numValue);
+                                        } else {
+                                            cell.setCellValue(strValue);
+                                        }
+                                    } catch (NumberFormatException e) {
+                                        cell.setCellValue(strValue);
+                                    }
+                                } else {
+                                    cell.setCellValue(strValue);
+                                }
+                            }
+                            
+                            cell.setCellStyle(dataStyle);
+                        }
+                    }
+                    
+                    // Auto-size first two columns
+                    sheet.autoSizeColumn(0);
+                    sheet.autoSizeColumn(1);
+                    
+                    // Write to file
+                    fos = new FileOutputStream(file);
+                    workbook.write(fos);
+                    
+                    return true;
+                    
+                } catch (Exception e) {
+                    errorMessage = e.getMessage();
+                    e.printStackTrace();
+                    return false;
+                } finally {
+                    if (fos != null) try { fos.close(); } catch (IOException e) { }
+                    if (workbook != null) try { workbook.close(); } catch (IOException e) { }
+                }
+            }
+            
+            @Override
+            protected void done() {
+                progressDialog.dispose();
+                
+                try {
+                    if (get()) {
+                        showSuccessNotification("Marks exported successfully!");
+                        statusLabel.setText("Exported to: " + file.getName());
+                        statusLabel.setForeground(primaryGreen);
+                    } else {
+                        JOptionPane.showMessageDialog(MarkEntryDialog.this, 
+                            "Export failed: " + errorMessage, 
+                            "Export Error", 
+                            JOptionPane.ERROR_MESSAGE);
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+        };
+        
+        worker.execute();
+        progressDialog.setVisible(true);
+    }
+    
+    private void exportToPDF(File file) {
+        JDialog progressDialog = createProgressDialog("Exporting to PDF...");
+        
+        SwingWorker<Boolean, Void> worker = new SwingWorker<Boolean, Void>() {
+            private String errorMessage = null;
+            
+            @Override
+            protected Boolean doInBackground() throws Exception {
+                Document document = new Document();
+                
+                try {
+                    PdfWriter.getInstance(document, new FileOutputStream(file));
+                    document.open();
+                    
+                    // Add title
+                    com.itextpdf.text.Font titleFont = new com.itextpdf.text.Font(
+                        com.itextpdf.text.Font.FontFamily.HELVETICA, 18, com.itextpdf.text.Font.BOLD);
+                    Paragraph title = new Paragraph("Mark Entry Report", titleFont);
+                    title.setAlignment(Element.ALIGN_CENTER);
+                    title.setSpacingAfter(10);
+                    document.add(title);
+                    
+                    // Add info
+                    com.itextpdf.text.Font infoFont = new com.itextpdf.text.Font(
+                        com.itextpdf.text.Font.FontFamily.HELVETICA, 12);
+                    Paragraph info = new Paragraph(
+                        "Section: " + sectionDropdown.getSelectedItem() + "\n" +
+                        "Subject: " + subjectDropdown.getSelectedItem() + "\n" +
+                        "Date: " + new SimpleDateFormat("dd-MM-yyyy HH:mm").format(new Date()),
+                        infoFont);
+                    info.setSpacingAfter(15);
+                    document.add(info);
+                    
+                    // Create table
+                    PdfPTable pdfTable = new PdfPTable(tableModel.getColumnCount());
+                    pdfTable.setWidthPercentage(100);
+                    
+                    // Set column widths
+                    float[] columnWidths = new float[tableModel.getColumnCount()];
+                    columnWidths[0] = 1.5f; // Roll No
+                    columnWidths[1] = 3f;   // Name
+                    for (int i = 2; i < tableModel.getColumnCount(); i++) {
+                        columnWidths[i] = 1.5f;
+                    }
+                    pdfTable.setWidths(columnWidths);
+                    
+                    // Add headers
+                    com.itextpdf.text.Font headerFont = new com.itextpdf.text.Font(
+                        com.itextpdf.text.Font.FontFamily.HELVETICA, 10, com.itextpdf.text.Font.BOLD);
+                    
+                    for (int col = 0; col < tableModel.getColumnCount(); col++) {
+                        PdfPCell cell = new PdfPCell(new Phrase(tableModel.getColumnName(col), headerFont));
+                        cell.setBackgroundColor(BaseColor.LIGHT_GRAY);
+                        cell.setHorizontalAlignment(Element.ALIGN_CENTER);
+                        cell.setPadding(5);
+                        pdfTable.addCell(cell);
+                    }
+                    
+                    // Add data
+                    com.itextpdf.text.Font dataFont = new com.itextpdf.text.Font(
+                        com.itextpdf.text.Font.FontFamily.HELVETICA, 9);
+                    
+                    for (int row = 0; row < tableModel.getRowCount(); row++) {
+                        for (int col = 0; col < tableModel.getColumnCount(); col++) {
+                            Object value = tableModel.getValueAt(row, col);
+                            String text = value != null ? value.toString() : "";
+                            
+                            PdfPCell cell = new PdfPCell(new Phrase(text, dataFont));
+                            cell.setHorizontalAlignment(col == 1 ? Element.ALIGN_LEFT : Element.ALIGN_CENTER);
+                            cell.setPadding(4);
+                            pdfTable.addCell(cell);
+                        }
+                    }
+                    
+                    document.add(pdfTable);
+                    
+                    // Add footer
+                    Paragraph footer = new Paragraph("\nGenerated by Academic Analyzer on " + 
+                        new SimpleDateFormat("dd-MM-yyyy HH:mm:ss").format(new Date()), 
+                        new com.itextpdf.text.Font(com.itextpdf.text.Font.FontFamily.HELVETICA, 8));
+                    footer.setAlignment(Element.ALIGN_CENTER);
+                    document.add(footer);
+                    
+                    return true;
+                    
+                } catch (Exception e) {
+                    errorMessage = e.getMessage();
+                    e.printStackTrace();
+                    return false;
+                } finally {
+                    if (document.isOpen()) {
+                        document.close();
+                    }
+                }
+            }
+            
+            @Override
+            protected void done() {
+                progressDialog.dispose();
+                
+                try {
+                    if (get()) {
+                        showSuccessNotification("Marks exported to PDF successfully!");
+                        statusLabel.setText("Exported to: " + file.getName());
+                        statusLabel.setForeground(primaryGreen);
+                    } else {
+                        JOptionPane.showMessageDialog(MarkEntryDialog.this, 
+                            "Export failed: " + errorMessage, 
+                            "Export Error", 
+                            JOptionPane.ERROR_MESSAGE);
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+        };
+        
+        worker.execute();
+        progressDialog.setVisible(true);
     }
     
     private void showFormatHelp() {
@@ -1638,6 +2306,12 @@ private void debugDropdownStates() {
             "Help documentation will be updated for the new structure", 
             "Help", 
             JOptionPane.INFORMATION_MESSAGE);
+    }
+    
+    private void closePanel() {
+        if (onCloseCallback != null) {
+            onCloseCallback.run();
+        }
     }
     
     // Main method for testing

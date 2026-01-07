@@ -17,7 +17,10 @@ public class SidebarPanel extends JPanel {
     public SidebarPanel(DashboardActions actions) {
         this.actions = actions; // Store the actions reference
         setPreferredSize(new Dimension(280, getHeight()));
+        setMinimumSize(new Dimension(280, 600));
+        setMaximumSize(new Dimension(280, Integer.MAX_VALUE));
         setBackground(backgroundColor);
+        setOpaque(true);
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
         setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, new Color(229, 231, 235)));
         
@@ -44,13 +47,16 @@ public class SidebarPanel extends JPanel {
         add(Box.createVerticalStrut(30));
         
         // Add sidebar buttons
-        JButton dashboardBtn = addSidebarButton("Dashboard", "🏠", null);
+        JButton dashboardBtn = addSidebarButton("Dashboard", "🏠", actions::showDashboard);
         selectButton(dashboardBtn); // Dashboard selected by default
         
+        addSidebarButton("Library", "📚", actions::showLibrary);
         addSidebarButton("Create Section", "➕", actions::openCreateSectionDialog);
         addSidebarButton("Add Student", "👤", actions::openStudentEntryDialog);
-        addSidebarButton("Analyzer", "📊", actions::openAnalyzer);
-        addSidebarButton("View Data", "📄", actions::openViewTool);
+        addSidebarButton("Mark Entry", "✏️", actions::openMarkEntryDialog);
+        addSidebarButton("Result Launcher", "🎯", actions::openStudentAnalyzer);
+        addSidebarButton("Analyzer", "📊", actions::openStudentAnalyzerPanel);
+        addSidebarButton("View Data", "📄", actions::openAnalysisView);
         
         // Add spacer to push logout to bottom
         add(Box.createVerticalGlue());

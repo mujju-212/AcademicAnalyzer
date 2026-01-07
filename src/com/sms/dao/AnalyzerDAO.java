@@ -291,4 +291,176 @@ public class AnalyzerDAO {
         public int totalMarks;
         public double percentage;
     }
+    
+    // ===== ADDED CLASSES FOR RESULT LAUNCHER =====
+    
+    public static class ComponentInfo {
+        public int id;
+        public String name;
+        public String type; // internal/external
+        public int maxMarks;
+        public int scaledMarks;
+        public String groupName;
+        public int sequenceOrder;
+        public String groupSelectionType;
+        public int groupSelectionCount;
+        
+        @Override
+        public String toString() {
+            return name + " (" + maxMarks + ")";
+        }
+    }
+    
+    public static class StudentComponentMark {
+        public int componentId;
+        public double marksObtained;
+        public double scaledMarks;
+        public boolean isCounted;
+        public String componentName;
+        public int maxMarks;
+        public int scaledToMarks;
+    }
+    
+    public static class SubjectInfo {
+        public int id;
+        public String name;
+        
+        @Override
+        public String toString() {
+            return name;
+        }
+    }
+    
+    // ===== ADDED METHODS FOR RESULT LAUNCHER =====
+    
+    public List<ComponentInfo> getComponentsForSubject(int sectionId, int subjectId, String componentType) {
+        List<ComponentInfo> components = new ArrayList<>();
+        
+        try {
+            Connection conn = DatabaseConnection.getConnection();
+            StringBuilder query = new StringBuilder();
+            query.append("SELECT mc.id, mc.component_name, mc.component_type, mc.actual_max_marks, ")
+                 .append("mc.scaled_to_marks, mc.component_group, mc.sequence_order, ")
+                 .append("cg.group_name, cg.selection_type, cg.selection_count ")
+                 .append("FROM marking_components mc ")
+                 .append("LEFT JOIN component_groups cg ON mc.group_id = cg.id ")
+                 .append("JOIN marking_schemes ms ON mc.scheme_id = ms.id ")
+                 .append("WHERE ms.section_id = ? AND ms.subject_id = ? ");
+            
+            if (!"all".equals(componentType)) {
+                query.append("AND mc.component_type = ? ");
+            }
+            
+            query.append("ORDER BY mc.sequence_order, mc.component_name");
+            
+            PreparedStatement ps = conn.prepareStatement(query.toString());
+            ps.setInt(1, sectionId);
+            ps.setInt(2, subjectId);
+            
+            if (!"all".equals(componentType)) {
+                ps.setString(3, componentType);
+            }
+            
+            ResultSet rs = ps.executeQuery();
+            
+            while (rs.next()) {
+                ComponentInfo comp = new ComponentInfo();
+                comp.id = rs.getInt("id");
+                comp.name = rs.getString("component_name");
+                comp.type = rs.getString("component_type");
+                comp.maxMarks = rs.getInt("actual_max_marks");
+                comp.scaledMarks = rs.getInt("scaled_to_marks");
+                comp.groupName = rs.getString("component_group");
+                comp.sequenceOrder = rs.getInt("sequence_order");
+                comp.groupSelectionType = rs.getString("selection_type");
+                comp.groupSelectionCount = rs.getInt("selection_count");
+                
+                components.add(comp);
+            }
+            
+            rs.close();
+            ps.close();
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        
+        return components;
+    }
+    
+    public Map<Integer, StudentComponentMark> getStudentComponentMarks(int studentId, List<Integer> componentIds) {
+        Map<Integer, StudentComponentMark> marks = new HashMap<>();
+        
+        if (componentIds.isEmpty()) return marks;
+        
+        try {
+            Connection conn = DatabaseConnection.getConnection();
+            String placeholders = String.join(",", Collections.nCopies(componentIds.size(), "?"));
+            
+            String query = "SELECT scm.component_id, scm.marks_obtained, scm.scaled_marks, " +
+                          "scm.is_counted, mc.component_name, mc.actual_max_marks, mc.scaled_to_marks " +
+                          "FROM student_component_marks scm " +
+                          "JOIN marking_components mc ON scm.component_id = mc.id " +
+                          "WHERE scm.student_id = ? AND scm.component_id IN (" + placeholders + ")";
+            
+            PreparedStatement ps = conn.prepareStatement(query);
+            ps.setInt(1, studentId);
+            
+            for (int i = 0; i < componentIds.size(); i++) {
+                ps.setInt(i + 2, componentIds.get(i));
+            }
+            
+            ResultSet rs = ps.executeQuery();
+            
+            while (rs.next()) {
+                StudentComponentMark mark = new StudentComponentMark();
+                mark.componentId = rs.getInt("component_id");
+                mark.marksObtained = rs.getDouble("marks_obtained");
+                mark.scaledMarks = rs.getDouble("scaled_marks");
+                mark.isCounted = rs.getBoolean("is_counted");
+                mark.componentName = rs.getString("component_name");
+                mark.maxMarks = rs.getInt("actual_max_marks");
+                mark.scaledToMarks = rs.getInt("scaled_to_marks");
+                
+                marks.put(mark.componentId, mark);
+            }
+            
+            rs.close();
+            ps.close();
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        
+        return marks;
+    }
+    
+    public List<SubjectInfo> getSubjectsForSection(int sectionId) {
+        List<SubjectInfo> subjects = new ArrayList<>();
+        
+        try {
+            Connection conn = DatabaseConnection.getConnection();
+            String query = "SELECT DISTINCT s.id, s.subject_name " +
+                          "FROM subjects s " +
+                          "JOIN marking_schemes ms ON s.id = ms.subject_id " +
+                          "WHERE ms.section_id = ? " +
+                          "ORDER BY s.subject_name";
+            
+            PreparedStatement ps = conn.prepareStatement(query);
+            ps.setInt(1, sectionId);
+            ResultSet rs = ps.executeQuery();
+            
+            while (rs.next()) {
+                SubjectInfo subject = new SubjectInfo();
+                subject.id = rs.getInt("id");
+                subject.name = rs.getString("subject_name");
+                subjects.add(subject);
+            }
+            
+            rs.close();
+            ps.close();
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        
+        return subjects;
+    }
 }

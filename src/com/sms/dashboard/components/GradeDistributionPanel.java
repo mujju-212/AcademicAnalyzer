@@ -208,4 +208,19 @@ public class GradeDistributionPanel extends JPanel {
         row.add(textLabel);
         return row;
     }
+    
+    /**
+     * Overload method to accept userId and fetch sections
+     */
+    public void updateData(int userId) {
+        try {
+            // Use SectionService instead of directly calling DAO
+            com.sms.dashboard.services.SectionService sectionService = new com.sms.dashboard.services.SectionService();
+            List<SectionInfo> sections = sectionService.getSectionsByUser(userId);
+            updateData(sections);
+        } catch (Exception e) {
+            System.err.println("Error updating grade distribution data: " + e.getMessage());
+            updateData((List<SectionInfo>) null); // Show empty state
+        }
+    }
 }

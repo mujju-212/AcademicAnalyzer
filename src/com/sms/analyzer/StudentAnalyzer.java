@@ -17,8 +17,11 @@ import org.jfree.chart.axis.NumberAxis;
 import org.jfree.chart.ui.TextAnchor;
 import com.formdev.flatlaf.FlatLightLaf;
 
-public class StudentAnalyzer extends JDialog {
+public class StudentAnalyzer extends JPanel {
 
+    private JFrame parentFrame;
+    private Runnable onCloseCallback;
+    
     // Modern color scheme
     private static final Color BACKGROUND_COLOR = new Color(245, 247, 250);
     private static final Color CARD_COLOR = Color.WHITE;
@@ -44,7 +47,12 @@ public class StudentAnalyzer extends JDialog {
     private Student currentStudent;
 
     public StudentAnalyzer(JFrame parent, HashMap<String, List<Student>> sectionStudents) {
-        super(parent != null ? parent : new JFrame(), "Student Performance Analyzer", true);
+        this(parent, sectionStudents, null);
+    }
+    
+    public StudentAnalyzer(JFrame parent, HashMap<String, List<Student>> sectionStudents, Runnable onCloseCallback) {
+        this.parentFrame = parent;
+        this.onCloseCallback = onCloseCallback;
         this.sectionStudents = sectionStudents != null ? sectionStudents : new HashMap<>();
 
         // Set light theme for modern look
@@ -56,13 +64,10 @@ public class StudentAnalyzer extends JDialog {
         UIManager.put("TextField.arc", 15);
         UIManager.put("Panel.arc", 15);
         
-        setSize(1400, 850);
-        setLocationRelativeTo(parent);
         setLayout(new BorderLayout());
-        getContentPane().setBackground(BACKGROUND_COLOR);
+        setBackground(BACKGROUND_COLOR);
         
         initializeUI();
-        setVisible(true);
     }
 
     public static void openAnalyzer(JFrame parent, HashMap<String, List<Student>> sectionStudents) {
@@ -72,6 +77,8 @@ public class StudentAnalyzer extends JDialog {
     private String selectedSection;
  // Update the initializeUI method - modify the input card section
     private void initializeUI() {
+        setBackground(BACKGROUND_COLOR);
+        
         // Main panel with padding
         JPanel mainPanel = new JPanel();
         mainPanel.setLayout(new BorderLayout(0, 20));
@@ -82,6 +89,23 @@ public class StudentAnalyzer extends JDialog {
         JPanel headerCard = createModernCard();
         headerCard.setLayout(new BorderLayout(20, 10));
         headerCard.setMaximumSize(new Dimension(Integer.MAX_VALUE, 120));
+        
+        // Add back button if callback present
+        if (onCloseCallback != null) {
+            JButton backButton = new JButton("← Back");
+            backButton.setFont(new Font("Segoe UI", Font.PLAIN, 14));
+            backButton.setForeground(PRIMARY_COLOR);
+            backButton.setBackground(CARD_COLOR);
+            backButton.setBorder(BorderFactory.createEmptyBorder(8, 16, 8, 16));
+            backButton.setFocusPainted(false);
+            backButton.setCursor(new Cursor(Cursor.HAND_CURSOR));
+            backButton.addActionListener(e -> closePanel());
+            
+            JPanel backPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+            backPanel.setOpaque(false);
+            backPanel.add(backButton);
+            headerCard.add(backPanel, BorderLayout.NORTH);
+        }
         
         // Title
         JLabel titleLabel = new JLabel("STUDENT PERFORMANCE ANALYZER");
@@ -113,8 +137,9 @@ public class StudentAnalyzer extends JDialog {
             if (selectedSection != null) {
                 HashMap<String, ArrayList<Student>> sectionMap = new HashMap<>();
                 sectionMap.put(selectedSection, new ArrayList<>(sectionStudents.get(selectedSection)));
-                SectionAnalyzer.openSectionAnalyzer((JFrame) getParent(), sectionMap);
-                dispose();
+                showSectionAnalyzer(sectionMap);
+            } else {
+                studentRadio.setSelected(true);
             }
         });
         
@@ -816,5 +841,28 @@ public class StudentAnalyzer extends JDialog {
         subjectPerformancePanel.add(chartTitle, BorderLayout.NORTH);
         subjectPerformancePanel.add(chartComponent, BorderLayout.CENTER);
         subjectPerformancePanel.add(totalMarksLabel, BorderLayout.SOUTH);
+    }
+    
+    private void showSectionAnalyzer(HashMap<String, ArrayList<Student>> sectionMap) {
+        removeAll();
+        
+        SectionAnalyzer sectionPanel = new SectionAnalyzer(parentFrame, sectionMap, () -> {
+            removeAll();
+            initializeUI();
+            revalidate();
+            repaint();
+            studentRadio.setSelected(true);
+        });
+        
+        setLayout(new BorderLayout());
+        add(sectionPanel, BorderLayout.CENTER);
+        revalidate();
+        repaint();
+    }
+    
+    private void closePanel() {
+        if (onCloseCallback != null) {
+            onCloseCallback.run();
+        }
     }
 }
