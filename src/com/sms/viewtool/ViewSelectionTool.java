@@ -673,10 +673,18 @@ public class ViewSelectionTool extends JPanel {
             if (phoneCheckBox.isSelected()) rowData.add(data.phone != null ? data.phone : "");
             if (sectionCheckBox.isSelected()) rowData.add(data.section);
             
-            // Add subject marks
+            // Add subject marks (aggregate all exam types)
             for (String subject : selectedSubjects) {
-                Integer mark = data.subjectMarks.get(subject);
-                rowData.add(mark != null ? mark : "-");
+                Map<String, Integer> examTypes = data.subjectMarks.get(subject);
+                if (examTypes != null && !examTypes.isEmpty()) {
+                    int total = 0;
+                    for (Integer mark : examTypes.values()) {
+                        total += mark;
+                    }
+                    rowData.add(total);
+                } else {
+                    rowData.add("-");
+                }
             }
             
             if (totalMarksCheckBox.isSelected()) rowData.add(data.totalMarks);
@@ -752,7 +760,7 @@ public class ViewSelectionTool extends JPanel {
         data.name = student.getName();
         data.rollNumber = student.getRollNumber();
         data.section = section;
-        data.subjectMarks = student.getMarks() != null ? student.getMarks() : new HashMap<>();
+        data.subjectMarks = student.getMarks() != null ? student.getMarks() : new HashMap<String, Map<String, Integer>>();
         
         System.out.println("DEBUG: Processing student: " + data.name + " (" + data.rollNumber + ")");
         System.out.println("DEBUG: Student marks: " + data.subjectMarks);
@@ -788,9 +796,13 @@ public class ViewSelectionTool extends JPanel {
         } else {
             // Use default calculations if section ID not found
             data.totalMarks = 0;
-            for (Integer mark : data.subjectMarks.values()) {
-                if (mark != null) {
-                    data.totalMarks += mark;
+            for (Map<String, Integer> examTypes : data.subjectMarks.values()) {
+                if (examTypes != null) {
+                    for (Integer mark : examTypes.values()) {
+                        if (mark != null) {
+                            data.totalMarks += mark;
+                        }
+                    }
                 }
             }
             data.percentage = 0.0;
@@ -830,18 +842,24 @@ public class ViewSelectionTool extends JPanel {
                 int passingMarks = rs.getInt("passing_marks");
                 int credit = rs.getInt("credit");
                 
-                Integer marks = data.subjectMarks.get(subjectName);
-                if (marks != null) {
-                    data.totalMarks += marks;
+                Map<String, Integer> examTypes = data.subjectMarks.get(subjectName);
+                if (examTypes != null && !examTypes.isEmpty()) {
+                    // Aggregate all exam types for this subject
+                    int totalSubjectMarks = 0;
+                    for (Integer mark : examTypes.values()) {
+                        totalSubjectMarks += mark;
+                    }
+                    
+                    data.totalMarks += totalSubjectMarks;
                     data.totalMaxMarks += maxMarks;
                     data.totalCredits += credit;
                     
                     // Calculate grade points for SGPA
-                    double gradePoint = calculateGradePoint(marks, maxMarks);
+                    double gradePoint = calculateGradePoint(totalSubjectMarks, maxMarks);
                     data.totalGradePoints += (gradePoint * credit);
                     
                     // Check if failed
-                    if (marks < passingMarks) {
+                    if (totalSubjectMarks < passingMarks) {
                         data.failedSubjectsCount++;
                     }
                 }
@@ -1238,7 +1256,7 @@ public class ViewSelectionTool extends JPanel {
         String email;
         String phone;
         String section;
-        Map<String, Integer> subjectMarks;
+        Map<String, Map<String, Integer>> subjectMarks;
         int totalMarks;
         int totalMaxMarks;
         double percentage;

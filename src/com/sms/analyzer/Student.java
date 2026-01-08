@@ -7,10 +7,10 @@ public class Student {
     private int id; // Add student ID for database reference
     private String name;
     private String rollNumber;
-    private Map<String, Integer> marks;
+    private Map<String, Map<String, Integer>> marks; // Changed to nested map: subject -> exam type -> marks
     private String section; // Add this field
     
-    public Student(String name, String rollNumber, Map<String, Integer> marks) {
+    public Student(String name, String rollNumber, Map<String, Map<String, Integer>> marks) {
         this.name = name;
         this.rollNumber = rollNumber;
         this.marks = marks != null ? marks : new HashMap<>();
@@ -41,9 +41,11 @@ public class Student {
  // Add this method to Student.java
     public int getTotalMarks() {
         int total = 0;
-        for (Integer mark : marks.values()) {
-            if (mark != null) {
-                total += mark;
+        for (Map<String, Integer> examTypes : marks.values()) {
+            for (Integer mark : examTypes.values()) {
+                if (mark != null) {
+                    total += mark;
+                }
             }
         }
         return total;
@@ -53,7 +55,7 @@ public class Student {
         return rollNumber;
     }
     
-    public Map<String, Integer> getMarks() {
+    public Map<String, Map<String, Integer>> getMarks() {
         return marks;
     }
 }

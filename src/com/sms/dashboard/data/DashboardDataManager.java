@@ -48,7 +48,7 @@ public class DashboardDataManager {
         try {
             Connection conn = DatabaseConnection.getConnection();
             String query = "SELECT s.student_name, s.roll_number, " +
-                          "sub.subject_name, sm.marks_obtained " +
+                          "sub.subject_name, sm.exam_type, sm.marks_obtained " +
                           "FROM students s " +
                           "LEFT JOIN student_marks sm ON s.id = sm.student_id " +
                           "LEFT JOIN subjects sub ON sm.subject_id = sub.id " +
@@ -74,7 +74,9 @@ public class DashboardDataManager {
                 }
                 
                 if (subject != null) {
-                    student.getMarks().put(subject, marks);
+                    String examType = rs.getString("exam_type");
+                    student.getMarks().putIfAbsent(subject, new HashMap<>());
+                    student.getMarks().get(subject).put(examType != null ? examType : "Default", marks);
                 }
             }
             
@@ -103,7 +105,7 @@ public class DashboardDataManager {
         return sectionStudents.keySet().toArray(new String[0]);
     }
     
-    public void addStudentEntry(String section, String name, String roll, HashMap<String, Integer> marks) {
+    public void addStudentEntry(String section, String name, String roll, HashMap<String, Map<String, Integer>> marks) {
         Student newStudent = new Student(name, roll, marks);
         sectionStudents.computeIfAbsent(section, k -> new ArrayList<>()).add(newStudent);
     }

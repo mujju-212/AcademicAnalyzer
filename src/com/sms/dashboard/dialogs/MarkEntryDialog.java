@@ -1045,6 +1045,50 @@ private void debugDropdownStates() {
                 }
             }
             
+            // FALLBACK: If no exam types configured but marks exist, auto-detect from student_marks table
+            if (examTypes.isEmpty()) {
+                String fallbackQuery = "SELECT DISTINCT exam_type, MAX(marks_obtained) as max_marks_found " +
+                                     "FROM student_marks " +
+                                     "WHERE subject_id = ? " +
+                                     "GROUP BY exam_type " +
+                                     "ORDER BY exam_type";
+                
+                try (PreparedStatement ps = conn.prepareStatement(fallbackQuery)) {
+                    ps.setInt(1, currentSubjectId);
+                    
+                    try (ResultSet rs = ps.executeQuery()) {
+                        int autoId = -1; // Use negative IDs for auto-detected exam types
+                        while (rs.next()) {
+                            String examTypeName = rs.getString("exam_type");
+                            int maxMarksFound = rs.getInt("max_marks_found");
+                            
+                            // Get max_marks from section_subjects if available
+                            int maxMarks = 100; // Default
+                            String maxMarksQuery = "SELECT max_marks FROM section_subjects " +
+                                                 "WHERE section_id = ? AND subject_id = ?";
+                            try (PreparedStatement psMax = conn.prepareStatement(maxMarksQuery)) {
+                                psMax.setInt(1, currentSectionId);
+                                psMax.setInt(2, currentSubjectId);
+                                try (ResultSet rsMax = psMax.executeQuery()) {
+                                    if (rsMax.next()) {
+                                        int sectionMaxMarks = rsMax.getInt("max_marks");
+                                        if (sectionMaxMarks > 0) {
+                                            maxMarks = sectionMaxMarks;
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            examTypes.add(new ExamTypeInfo(
+                                autoId--,  // Negative ID for text-based exam types
+                                examTypeName,
+                                maxMarks
+                            ));
+                        }
+                    }
+                }
+            }
+            
         } catch (SQLException e) {
             e.printStackTrace();
             JOptionPane.showMessageDialog(this, "Error loading exam types: " + e.getMessage());
@@ -1198,21 +1242,37 @@ private void debugDropdownStates() {
             ExamTypeInfo exam = examTypes.get(examIndex);
             
             try (Connection conn = DatabaseConnection.getConnection()) {
-                // Query to get marks for this exam type
-                String query = "SELECT s.roll_number, m.marks " +
-                             "FROM marks m " +
-                             "JOIN students s ON m.student_id = s.id " +
-                             "WHERE m.exam_type_id = ? AND m.subject_id = ?";
+                String query;
+                
+                // Check if this is a text-based exam type (negative ID) or regular exam_type_id
+                if (exam.id < 0) {
+                    // Load from student_marks table using text exam_type
+                    query = "SELECT s.roll_number, m.marks_obtained " +
+                           "FROM student_marks m " +
+                           "JOIN students s ON m.student_id = s.id " +
+                           "WHERE m.exam_type = ? AND m.subject_id = ?";
+                } else {
+                    // Load from marks table using exam_type_id
+                    query = "SELECT s.roll_number, m.marks " +
+                           "FROM marks m " +
+                           "JOIN students s ON m.student_id = s.id " +
+                           "WHERE m.exam_type_id = ? AND m.subject_id = ?";
+                }
                 
                 try (PreparedStatement ps = conn.prepareStatement(query)) {
-                    ps.setInt(1, exam.id);
-                    ps.setInt(2, currentSubjectId);
+                    if (exam.id < 0) {
+                        ps.setString(1, exam.name);  // Text exam type
+                        ps.setInt(2, currentSubjectId);
+                    } else {
+                        ps.setInt(1, exam.id);  // Integer exam_type_id
+                        ps.setInt(2, currentSubjectId);
+                    }
                     
                     try (ResultSet rs = ps.executeQuery()) {
                         if (rs != null && rs.getMetaData().getColumnCount() > 0) {
                             while (rs.next()) {
                                 String rollNumber = rs.getString("roll_number");
-                                double marks = rs.getDouble("marks");
+                                double marks = rs.getDouble(exam.id < 0 ? "marks_obtained" : "marks");
                                 
                                 // Find student row and set marks
                                 for (int row = 0; row < tableModel.getRowCount(); row++) {
@@ -1305,32 +1365,68 @@ private void debugDropdownStates() {
                 try (Connection conn = DatabaseConnection.getConnection()) {
                     if (value.isEmpty()) {
                         // Delete mark if value is empty
-                        String deleteQuery = "DELETE FROM marks WHERE student_id = ? AND exam_type_id = ? AND subject_id = ?";
-                        try (PreparedStatement ps = conn.prepareStatement(deleteQuery)) {
-                            ps.setInt(1, studentId);
-                            ps.setInt(2, exam.id);
-                            ps.setInt(3, currentSubjectId);
-                            ps.executeUpdate();
+                        if (exam.id < 0) {
+                            // Text-based exam type - use student_marks table
+                            String deleteQuery = "DELETE FROM student_marks WHERE student_id = ? AND exam_type = ? AND subject_id = ?";
+                            try (PreparedStatement ps = conn.prepareStatement(deleteQuery)) {
+                                ps.setInt(1, studentId);
+                                ps.setString(2, exam.name);
+                                ps.setInt(3, currentSubjectId);
+                                ps.executeUpdate();
+                            }
+                        } else {
+                            // ID-based exam type - use marks table
+                            String deleteQuery = "DELETE FROM marks WHERE student_id = ? AND exam_type_id = ? AND subject_id = ?";
+                            try (PreparedStatement ps = conn.prepareStatement(deleteQuery)) {
+                                ps.setInt(1, studentId);
+                                ps.setInt(2, exam.id);
+                                ps.setInt(3, currentSubjectId);
+                                ps.executeUpdate();
+                            }
                         }
                     } else {
-                        // Delete existing mark first
-                        String deleteQuery = "DELETE FROM marks WHERE student_id = ? AND exam_type_id = ? AND subject_id = ?";
-                        try (PreparedStatement ps = conn.prepareStatement(deleteQuery)) {
-                            ps.setInt(1, studentId);
-                            ps.setInt(2, exam.id);
-                            ps.setInt(3, currentSubjectId);
-                            ps.executeUpdate();
-                        }
-                        
-                        // Insert new mark
-                        String insertQuery = "INSERT INTO marks (student_id, exam_type_id, subject_id, marks, created_by) VALUES (?, ?, ?, ?, ?)";
-                        try (PreparedStatement ps = conn.prepareStatement(insertQuery)) {
-                            ps.setInt(1, studentId);
-                            ps.setInt(2, exam.id);
-                            ps.setInt(3, currentSubjectId);
-                            ps.setDouble(4, Double.parseDouble(value));
-                            ps.setInt(5, currentUserId);
-                            ps.executeUpdate();
+                        if (exam.id < 0) {
+                            // Text-based exam type - use student_marks table
+                            // Delete existing mark first
+                            String deleteQuery = "DELETE FROM student_marks WHERE student_id = ? AND exam_type = ? AND subject_id = ?";
+                            try (PreparedStatement ps = conn.prepareStatement(deleteQuery)) {
+                                ps.setInt(1, studentId);
+                                ps.setString(2, exam.name);
+                                ps.setInt(3, currentSubjectId);
+                                ps.executeUpdate();
+                            }
+                            
+                            // Insert new mark
+                            String insertQuery = "INSERT INTO student_marks (student_id, exam_type, subject_id, marks_obtained, created_by) VALUES (?, ?, ?, ?, ?)";
+                            try (PreparedStatement ps = conn.prepareStatement(insertQuery)) {
+                                ps.setInt(1, studentId);
+                                ps.setString(2, exam.name);
+                                ps.setInt(3, currentSubjectId);
+                                ps.setInt(4, Integer.parseInt(value));
+                                ps.setInt(5, currentUserId);
+                                ps.executeUpdate();
+                            }
+                        } else {
+                            // ID-based exam type - use marks table
+                            // Delete existing mark first
+                            String deleteQuery = "DELETE FROM marks WHERE student_id = ? AND exam_type_id = ? AND subject_id = ?";
+                            try (PreparedStatement ps = conn.prepareStatement(deleteQuery)) {
+                                ps.setInt(1, studentId);
+                                ps.setInt(2, exam.id);
+                                ps.setInt(3, currentSubjectId);
+                                ps.executeUpdate();
+                            }
+                            
+                            // Insert new mark
+                            String insertQuery = "INSERT INTO marks (student_id, exam_type_id, subject_id, marks, created_by) VALUES (?, ?, ?, ?, ?)";
+                            try (PreparedStatement ps = conn.prepareStatement(insertQuery)) {
+                                ps.setInt(1, studentId);
+                                ps.setInt(2, exam.id);
+                                ps.setInt(3, currentSubjectId);
+                                ps.setDouble(4, Double.parseDouble(value));
+                                ps.setInt(5, currentUserId);
+                                ps.executeUpdate();
+                            }
                         }
                     }
                 } catch (Exception e) {
@@ -1482,25 +1578,50 @@ private void debugDropdownStates() {
                             String value = valueObj != null ? valueObj.toString().trim() : "";
                             
                             if (!value.isEmpty()) {
-                                // Delete existing mark for this student, exam type, and subject
-                                String deleteQuery = "DELETE FROM marks WHERE student_id = ? AND exam_type_id = ? AND subject_id = ?";
-                                try (PreparedStatement ps = conn.prepareStatement(deleteQuery)) {
-                                    ps.setInt(1, studentId);
-                                    ps.setInt(2, exam.id);
-                                    ps.setInt(3, currentSubjectId);
-                                    ps.executeUpdate();
-                                }
-                                
-                                // Insert new mark
-                                String insertQuery = "INSERT INTO marks (student_id, exam_type_id, subject_id, marks, created_by) VALUES (?, ?, ?, ?, ?)";
-                                try (PreparedStatement ps = conn.prepareStatement(insertQuery)) {
-                                    ps.setInt(1, studentId);
-                                    ps.setInt(2, exam.id);
-                                    ps.setInt(3, currentSubjectId);
-                                    ps.setDouble(4, Double.parseDouble(value));
-                                    ps.setInt(5, currentUserId);
-                                    ps.executeUpdate();
-                                    savedCount++;
+                                if (exam.id < 0) {
+                                    // Text-based exam type - use student_marks table
+                                    // Delete existing mark
+                                    String deleteQuery = "DELETE FROM student_marks WHERE student_id = ? AND exam_type = ? AND subject_id = ?";
+                                    try (PreparedStatement ps = conn.prepareStatement(deleteQuery)) {
+                                        ps.setInt(1, studentId);
+                                        ps.setString(2, exam.name);
+                                        ps.setInt(3, currentSubjectId);
+                                        ps.executeUpdate();
+                                    }
+                                    
+                                    // Insert new mark
+                                    String insertQuery = "INSERT INTO student_marks (student_id, exam_type, subject_id, marks_obtained, created_by) VALUES (?, ?, ?, ?, ?)";
+                                    try (PreparedStatement ps = conn.prepareStatement(insertQuery)) {
+                                        ps.setInt(1, studentId);
+                                        ps.setString(2, exam.name);
+                                        ps.setInt(3, currentSubjectId);
+                                        ps.setInt(4, (int) Double.parseDouble(value));
+                                        ps.setInt(5, currentUserId);
+                                        ps.executeUpdate();
+                                        savedCount++;
+                                    }
+                                } else {
+                                    // ID-based exam type - use marks table
+                                    // Delete existing mark
+                                    String deleteQuery = "DELETE FROM marks WHERE student_id = ? AND exam_type_id = ? AND subject_id = ?";
+                                    try (PreparedStatement ps = conn.prepareStatement(deleteQuery)) {
+                                        ps.setInt(1, studentId);
+                                        ps.setInt(2, exam.id);
+                                        ps.setInt(3, currentSubjectId);
+                                        ps.executeUpdate();
+                                    }
+                                    
+                                    // Insert new mark
+                                    String insertQuery = "INSERT INTO marks (student_id, exam_type_id, subject_id, marks, created_by) VALUES (?, ?, ?, ?, ?)";
+                                    try (PreparedStatement ps = conn.prepareStatement(insertQuery)) {
+                                        ps.setInt(1, studentId);
+                                        ps.setInt(2, exam.id);
+                                        ps.setInt(3, currentSubjectId);
+                                        ps.setDouble(4, Double.parseDouble(value));
+                                        ps.setInt(5, currentUserId);
+                                        ps.executeUpdate();
+                                        savedCount++;
+                                    }
                                 }
                             }
                         }

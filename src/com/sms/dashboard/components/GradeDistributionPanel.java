@@ -213,10 +213,25 @@ public class GradeDistributionPanel extends JPanel {
      * Overload method to accept userId and fetch sections
      */
     public void updateData(int userId) {
+        updateData(userId, 0); // Default to all years
+    }
+    
+    /**
+     * Overload method to accept userId and academicYear and fetch filtered sections
+     */
+    public void updateData(int userId, int academicYear) {
         try {
             // Use SectionService instead of directly calling DAO
             com.sms.dashboard.services.SectionService sectionService = new com.sms.dashboard.services.SectionService();
             List<SectionInfo> sections = sectionService.getSectionsByUser(userId);
+            
+            // Filter by academic year if specified
+            if (academicYear > 0) {
+                sections = sections.stream()
+                    .filter(s -> s.academicYear == academicYear)
+                    .collect(java.util.stream.Collectors.toList());
+            }
+            
             updateData(sections);
         } catch (Exception e) {
             System.err.println("Error updating grade distribution data: " + e.getMessage());

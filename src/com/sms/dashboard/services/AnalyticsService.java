@@ -15,11 +15,21 @@ public class AnalyticsService {
      * Gets the average percentage across all students for a user
      */
     public double getAveragePercentage(int userId) {
+        return getAveragePercentage(userId, 0); // Default to all years
+    }
+    
+    /**
+     * Gets the average percentage across all students for a user filtered by academic year
+     */
+    public double getAveragePercentage(int userId, int academicYear) {
+        String yearFilter = (academicYear > 0) ? " AND sec.academic_year = " + academicYear : "";
+        
         String query = "SELECT AVG((sm.marks_obtained / ss.max_marks) * 100) as avg_percentage " +
                       "FROM student_marks sm " +
                       "INNER JOIN section_subjects ss ON sm.subject_id = ss.subject_id " +
                       "INNER JOIN students s ON sm.student_id = s.id " +
-                      "WHERE s.created_by = ? AND sm.marks_obtained IS NOT NULL AND ss.max_marks > 0";
+                      "INNER JOIN sections sec ON s.section_id = sec.id " +
+                      "WHERE s.created_by = ? AND sm.marks_obtained IS NOT NULL AND ss.max_marks > 0" + yearFilter;
         
         Connection conn = null;
         PreparedStatement ps = null;
@@ -172,13 +182,25 @@ public class AnalyticsService {
      * Gets comprehensive dashboard statistics
      */
     public java.util.HashMap<String, Object> getDashboardStatistics(int userId) {
+        return getDashboardStatistics(userId, 0); // 0 means all years
+    }
+    
+    public java.util.HashMap<String, Object> getDashboardStatistics(int userId, int academicYear) {
         java.util.HashMap<String, Object> stats = new java.util.HashMap<>();
         
-        System.out.println("Getting dashboard statistics for user: " + userId);
+        System.out.println("Getting dashboard statistics for user: " + userId + ", year: " + (academicYear == 0 ? "All" : academicYear));
         
         try {
-            // Total students
-            String studentQuery = "SELECT COUNT(*) as count FROM students WHERE created_by = ?";
+            // Build year filter condition
+            String yearFilter = "";
+            if (academicYear > 0) {
+                yearFilter = " AND sec.academic_year = " + academicYear;
+            }
+            
+            // Total students (filtered by year)
+            String studentQuery = "SELECT COUNT(*) as count FROM students st " +
+                                 "INNER JOIN sections sec ON st.section_id = sec.id " +
+                                 "WHERE st.created_by = ?" + yearFilter;
             Connection conn = DatabaseConnection.getConnection();
             PreparedStatement ps = conn.prepareStatement(studentQuery);
             ps.setInt(1, userId);
@@ -186,10 +208,10 @@ public class AnalyticsService {
             stats.put("totalStudents", rs.next() ? rs.getInt("count") : 0);
             rs.close();
             ps.close();
-            // Don't close connection - it's shared
             
-            // Total sections
-            String sectionQuery = "SELECT COUNT(*) as count FROM sections WHERE created_by = ?";
+            // Total sections (filtered by year)
+            String sectionQuery = "SELECT COUNT(*) as count FROM sections WHERE created_by = ?" + 
+                                 (academicYear > 0 ? " AND academic_year = " + academicYear : "");
             conn = DatabaseConnection.getConnection();
             ps = conn.prepareStatement(sectionQuery);
             ps.setInt(1, userId);
@@ -199,10 +221,9 @@ public class AnalyticsService {
             System.out.println("Total sections from database: " + sectionCount);
             rs.close();
             ps.close();
-            // Don't close connection - it's shared
             
-            // Average score
-            double avgScore = getAveragePercentage(userId);
+            // Average score (filtered by year)
+            double avgScore = getAveragePercentage(userId, academicYear);
             stats.put("averageScore", avgScore);
             System.out.println("Average score: " + avgScore);
             
@@ -214,9 +235,10 @@ public class AnalyticsService {
                 try {
                     String topPerformerQuery = "SELECT s." + nameCol + " as student_name, AVG((sm.marks_obtained / ss.max_marks) * 100) as avg_pct " +
                                              "FROM students s " +
+                                             "INNER JOIN sections sec ON s.section_id = sec.id " +
                                              "INNER JOIN student_marks sm ON s.id = sm.student_id " +
                                              "INNER JOIN section_subjects ss ON sm.subject_id = ss.subject_id AND s.section_id = ss.section_id " +
-                                             "WHERE s.created_by = ? AND sm.marks_obtained IS NOT NULL AND ss.max_marks > 0 " +
+                                             "WHERE s.created_by = ? AND sm.marks_obtained IS NOT NULL AND ss.max_marks > 0" + yearFilter + " " +
                                              "GROUP BY s.id, s." + nameCol + " " +
                                              "ORDER BY avg_pct DESC " +
                                              "LIMIT 1";
@@ -229,12 +251,10 @@ public class AnalyticsService {
                         System.out.println("Top performer: " + topPerformer);
                         rs.close();
                         ps.close();
-                        // Don't close connection - it's shared
                         break; // Found valid column, exit loop
                     }
                     rs.close();
                     ps.close();
-                    // Don't close connection - it's shared
                 } catch (SQLException e) {
                     // Try next column name
                     try {

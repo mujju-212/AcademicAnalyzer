@@ -508,7 +508,7 @@ public class CreateSectionPanel extends JPanel {
         
         try (Connection conn = DatabaseConnection.getConnection()) {
             // Load basic section info
-            String sql = "SELECT section_name, total_students FROM sections WHERE id = ?";
+            String sql = "SELECT section_name, total_students, academic_year, semester FROM sections WHERE id = ?";
             try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
                 pstmt.setInt(1, editSectionId);
                 ResultSet rs = pstmt.executeQuery();
@@ -516,6 +516,16 @@ public class CreateSectionPanel extends JPanel {
                 if (rs.next()) {
                     sectionNameField.setText(rs.getString("section_name"));
                     studentCountField.setText(String.valueOf(rs.getInt("total_students")));
+                    
+                    // Load year and semester
+                    int academicYear = rs.getInt("academic_year");
+                    int semester = rs.getInt("semester");
+                    if (yearSpinner != null && academicYear > 0) {
+                        yearSpinner.setValue(academicYear);
+                    }
+                    if (semesterField != null && semester > 0) {
+                        semesterField.setText(String.valueOf(semester));
+                    }
                 }
             }
             
@@ -529,12 +539,15 @@ public class CreateSectionPanel extends JPanel {
                 ResultSet rs = pstmt.executeQuery();
                 
                 while (rs.next()) {
+                    String subjectName = rs.getString("subject_name");
                     subjectTableModel.addRow(new Object[]{
-                        rs.getString("subject_name"),
+                        subjectName,
                         String.valueOf(rs.getInt("max_marks")),
                         String.valueOf(rs.getInt("credit")),
                         String.valueOf(rs.getInt("passing_marks"))
                     });
+                    // Also add to exam patterns combo
+                    examPatternsSubjectCombo.addItem(subjectName);
                 }
             }
             
@@ -1044,7 +1057,7 @@ public class CreateSectionPanel extends JPanel {
             conn.setAutoCommit(false);
             
             // Update sections table
-            String updateSectionSQL = "UPDATE sections SET section_name = ?, total_students = ?, year = ?, semester = ? WHERE id = ?";
+            String updateSectionSQL = "UPDATE sections SET section_name = ?, total_students = ?, academic_year = ?, semester = ? WHERE id = ?";
             try (PreparedStatement pstmt = conn.prepareStatement(updateSectionSQL)) {
                 pstmt.setString(1, sectionName);
                 pstmt.setInt(2, studentCount);

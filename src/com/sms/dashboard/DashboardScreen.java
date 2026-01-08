@@ -56,6 +56,10 @@ public class DashboardScreen extends JFrame implements DashboardActions {
     private GradeDistributionPanel gradeDistPanel;
     private JPanel summaryPanel;
     
+    // Year filter
+    private JComboBox<String> yearFilterComboBox;
+    private int selectedYear = 0; // 0 means "All Years"
+    
     // Auto-refresh timer
     private Timer autoRefreshTimer;
     private boolean autoRefreshEnabled = false;
@@ -326,15 +330,40 @@ public class DashboardScreen extends JFrame implements DashboardActions {
     }
     
     private JPanel createSectionContainer() {
-        JPanel sectionContainer = new JPanel(new BorderLayout());
+        JPanel sectionContainer = new JPanel(new BorderLayout(0, 15));
         sectionContainer.setOpaque(false);
         
-        // Add "Sections" heading
+        // Header with title and year filter
+        JPanel headerPanel = new JPanel(new BorderLayout());
+        headerPanel.setOpaque(false);
+        headerPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 15, 0));
+        
+        // "Sections" heading
         JLabel sectionsHeading = new JLabel("Sections");
         sectionsHeading.setFont(new Font("SansSerif", Font.BOLD, 24));
         sectionsHeading.setForeground(TEXT_PRIMARY);
-        sectionsHeading.setBorder(BorderFactory.createEmptyBorder(0, 0, 20, 0));
-        sectionContainer.add(sectionsHeading, BorderLayout.NORTH);
+        headerPanel.add(sectionsHeading, BorderLayout.WEST);
+        
+        // Year filter panel (right side)
+        JPanel filterPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
+        filterPanel.setOpaque(false);
+        
+        JLabel filterLabel = new JLabel("Academic Year:");
+        filterLabel.setFont(new Font("SansSerif", Font.PLAIN, 14));
+        filterLabel.setForeground(TEXT_SECONDARY);
+        
+        // Create year filter dropdown
+        yearFilterComboBox = new JComboBox<>();
+        yearFilterComboBox.setFont(new Font("SansSerif", Font.PLAIN, 14));
+        yearFilterComboBox.setPreferredSize(new Dimension(150, 35));
+        yearFilterComboBox.setBackground(Color.WHITE);
+        yearFilterComboBox.addActionListener(e -> onYearFilterChanged());
+        
+        filterPanel.add(filterLabel);
+        filterPanel.add(yearFilterComboBox);
+        headerPanel.add(filterPanel, BorderLayout.EAST);
+        
+        sectionContainer.add(headerPanel, BorderLayout.NORTH);
         
         // Horizontal scrolling cards panel
         sectionCardsPanel = new JPanel();
@@ -548,10 +577,63 @@ public class DashboardScreen extends JFrame implements DashboardActions {
     public void refreshDashboard() {
         SwingUtilities.invokeLater(() -> {
             try {
+                populateYearFilter(); // Populate year dropdown first
                 loadSectionCards();
                 updateAnalytics();
             } catch (Exception e) {
                 DashboardErrorHandler.handleError("Failed to refresh dashboard", e);
+            }
+        });
+    }
+    
+    private void onYearFilterChanged() {
+        String selected = (String) yearFilterComboBox.getSelectedItem();
+        if (selected != null) {
+            if (selected.equals("All Years")) {
+                selectedYear = 0;
+            } else {
+                try {
+                    selectedYear = Integer.parseInt(selected);
+                } catch (NumberFormatException e) {
+                    selectedYear = 0;
+                }
+            }
+            loadSectionCards(); // Reload sections with new filter
+            updateAnalytics(); // Update analytics for filtered year
+        }
+    }
+    
+    private void populateYearFilter() {
+        BackgroundTaskUtil.executeAsync(() -> {
+            try {
+                List<SectionInfo> allSections = sectionService.getUserSections(userId);
+                java.util.Set<Integer> years = new java.util.TreeSet<>(java.util.Collections.reverseOrder());
+                
+                // Collect unique years
+                for (SectionInfo section : allSections) {
+                    if (section.academicYear > 0) {
+                        years.add(section.academicYear);
+                    }
+                }
+                
+                SwingUtilities.invokeLater(() -> {
+                    yearFilterComboBox.removeAllItems();
+                    yearFilterComboBox.addItem("All Years");
+                    
+                    for (Integer year : years) {
+                        yearFilterComboBox.addItem(String.valueOf(year));
+                    }
+                    
+                    // Set selected item based on current filter
+                    if (selectedYear == 0) {
+                        yearFilterComboBox.setSelectedItem("All Years");
+                    } else {
+                        yearFilterComboBox.setSelectedItem(String.valueOf(selectedYear));
+                    }
+                });
+            } catch (Exception e) {
+                SwingUtilities.invokeLater(() -> 
+                    DashboardErrorHandler.handleError("Failed to load year filter", e));
             }
         });
     }
@@ -575,8 +657,17 @@ public class DashboardScreen extends JFrame implements DashboardActions {
     private void loadSectionCards() {
         BackgroundTaskUtil.executeAsync(() -> {
             try {
-                List<SectionInfo> sections = sectionService.getUserSections(userId);
-                SwingUtilities.invokeLater(() -> updateSectionCards(sections));
+                List<SectionInfo> allSections = sectionService.getUserSections(userId);
+                
+                // Filter sections by selected year
+                List<SectionInfo> filteredSections = new java.util.ArrayList<>();
+                for (SectionInfo section : allSections) {
+                    if (selectedYear == 0 || section.academicYear == selectedYear) {
+                        filteredSections.add(section);
+                    }
+                }
+                
+                SwingUtilities.invokeLater(() -> updateSectionCards(filteredSections));
             } catch (Exception e) {
                 SwingUtilities.invokeLater(() -> 
                     DashboardErrorHandler.handleError("Failed to load sections", e));
@@ -645,11 +736,11 @@ public class DashboardScreen extends JFrame implements DashboardActions {
     private void updateAnalytics() {
         BackgroundTaskUtil.executeAsync(() -> {
             try {
-                // Update grade distribution
-                SwingUtilities.invokeLater(() -> gradeDistPanel.updateData(userId));
+                // Update grade distribution with year filter
+                SwingUtilities.invokeLater(() -> gradeDistPanel.updateData(userId, selectedYear));
                 
-                // Update summary statistics
-                HashMap<String, Object> stats = analyticsService.getDashboardStatistics(userId);
+                // Update summary statistics with year filter
+                HashMap<String, Object> stats = analyticsService.getDashboardStatistics(userId, selectedYear);
                 SwingUtilities.invokeLater(() -> updateSummaryPanel(stats));
             } catch (Exception e) {
                 SwingUtilities.invokeLater(() -> 

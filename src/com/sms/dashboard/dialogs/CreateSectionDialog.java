@@ -2228,7 +2228,7 @@ public class CreateSectionDialog extends JDialog {
         
         try (Connection conn = DatabaseConnection.getConnection()) {
             // Load basic section info
-            String sql = "SELECT section_name, total_students, marking_system FROM sections WHERE id = ?";
+            String sql = "SELECT section_name, total_students, marking_system, academic_year, semester FROM sections WHERE id = ?";
             try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
                 pstmt.setInt(1, editSectionId);
                 ResultSet rs = pstmt.executeQuery();
@@ -2250,19 +2250,35 @@ public class CreateSectionDialog extends JDialog {
                 pstmt.setInt(1, editSectionId);
                 ResultSet rs = pstmt.executeQuery();
                 
+                System.out.println("Loading subjects for section ID: " + editSectionId);
+                int count = 0;
                 while (rs.next()) {
+                    String subjectName = rs.getString("subject_name");
+                    count++;
+                    System.out.println("  Subject " + count + ": " + subjectName);
                     subjectTableModel.addRow(new Object[]{
-                        rs.getString("subject_name"),
+                        subjectName,
                         String.valueOf(rs.getInt("max_marks")),
                         String.valueOf(rs.getInt("credit")),
                         String.valueOf(rs.getInt("passing_marks"))
                     });
+                    
+                    // Initialize empty exam pattern for this subject if not exists
+                    if (!subjectExamPatterns.containsKey(subjectName)) {
+                        subjectExamPatterns.put(subjectName, new ArrayList<>());
+                    }
                 }
+                System.out.println("Total subjects loaded: " + count);
+                System.out.println("SubjectTableModel row count: " + subjectTableModel.getRowCount());
             }
             
             // Update the exam patterns combo box
             if (examPatternsSubjectCombo != null) {
+                System.out.println("Updating examPatternsSubjectCombo...");
                 updateSubjectCombo(examPatternsSubjectCombo);
+                System.out.println("examPatternsSubjectCombo item count: " + examPatternsSubjectCombo.getItemCount());
+            } else {
+                System.out.println("WARNING: examPatternsSubjectCombo is null!");
             }
             
             // Load exam types for each subject
