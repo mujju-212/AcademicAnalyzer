@@ -8,6 +8,9 @@ import java.util.*;
 import java.util.List;
 import com.sms.dao.SectionDAO.SectionInfo;
 import com.sms.dao.SectionEditDAO;
+import com.sms.analyzer.SectionAnalyzer;
+import com.sms.analyzer.Student;
+import com.sms.dao.StudentDAO;
 
 /**
  * Hierarchical panel displaying sections organized by Year → Semester
@@ -159,6 +162,7 @@ public class YearSemesterPanel extends JPanel {
         for (SectionInfo section : sections) {
             SectionCardPanel card = new SectionCardPanel(section.sectionName, section.totalStudents);
             addContextMenuToCard(card, section);
+            addClickHandlerToCard(card, section);
             sectionsContainer.add(card);
             sectionsContainer.add(Box.createHorizontalStrut(15));
         }
@@ -208,6 +212,7 @@ public class YearSemesterPanel extends JPanel {
             for (SectionInfo section : sections) {
                 SectionCardPanel card = new SectionCardPanel(section.sectionName, section.totalStudents);
                 addContextMenuToCard(card, section);
+                addClickHandlerToCard(card, section);
                 sectionsRow.add(card);
                 sectionsRow.add(Box.createHorizontalStrut(15));
             }
@@ -254,6 +259,56 @@ public class YearSemesterPanel extends JPanel {
                 }
             }
         });
+    }
+    
+    private void addClickHandlerToCard(SectionCardPanel card, SectionInfo section) {
+        System.out.println("@@@ ADDING CLICK HANDLER TO CARD: " + section.sectionName + " @@@");
+        
+        // Add combined mouse listener for both click and hover
+        MouseAdapter clickListener = new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                System.out.println("@@@ MOUSE CLICKED EVENT: button=" + e.getButton() + ", section=" + section.sectionName + " @@@");
+                // Only trigger on left-click, not right-click (which opens context menu)
+                if (e.getButton() == MouseEvent.BUTTON1) {
+                    System.out.println("@@@ OPENING SECTION RANKING FOR: " + section.sectionName + " @@@");
+                    openSectionRanking(section);
+                }
+            }
+            
+            @Override
+            public void mousePressed(MouseEvent e) {
+                System.out.println("@@@ MOUSE PRESSED: button=" + e.getButton() + ", section=" + section.sectionName + " @@@");
+                // Handle right-click for context menu - don't interfere
+                if (e.getButton() == MouseEvent.BUTTON3 || e.isPopupTrigger()) {
+                    return; // Let the context menu handler deal with it
+                }
+            }
+            
+            @Override
+            public void mouseReleased(MouseEvent e) {
+                System.out.println("@@@ MOUSE RELEASED: button=" + e.getButton() + ", section=" + section.sectionName + " @@@");
+            }
+        };
+        
+        card.addMouseListener(clickListener);
+        System.out.println("@@@ CLICK HANDLER ADDED TO CARD: " + section.sectionName + " @@@");
+    }
+    
+    private void openSectionRanking(SectionInfo section) {
+        System.out.println("@@@ OPENING RANKING TABLE FOR: " + section.sectionName + " @@@");
+        
+        // Get the DashboardScreen instance
+        Window window = SwingUtilities.getWindowAncestor(this);
+        if (window instanceof com.sms.dashboard.DashboardScreen) {
+            com.sms.dashboard.DashboardScreen dashboard = (com.sms.dashboard.DashboardScreen) window;
+            
+            // Use DashboardScreen's method to show section ranking table
+            // This will display just the table in the main content area while keeping sidebar visible
+            dashboard.showSectionRankingTable(section.id, section.sectionName);
+        } else {
+            System.err.println("@@@ ERROR: Parent window is not DashboardScreen @@@");
+        }
     }
     
     private void showEditDialog(SectionInfo section) {

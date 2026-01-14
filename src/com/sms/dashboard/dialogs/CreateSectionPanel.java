@@ -2,12 +2,19 @@ package com.sms.dashboard.dialogs;
 
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
+import javax.swing.table.TableCellRenderer;
+import javax.swing.table.TableCellEditor;
+import javax.swing.AbstractCellEditor;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.sql.Connection;
+import java.sql.DatabaseMetaData;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.util.*;
 import java.util.List;
@@ -24,6 +31,31 @@ import static com.sms.dashboard.constants.DashboardConstants.*;
 
 /**
  * Panel for creating new sections - embedded in dashboard instead of separate dialog
+ * 
+ * WEIGHTED CALCULATION SYSTEM (Current Implementation):
+ * ======================================================
+ * This panel allows creating sections with subjects using a weighted grading system.
+ * 
+ * KEY PRINCIPLES:
+ * - Each exam component has a weightage % (contribution to subject total of 100)
+ * - Marks entered DIRECTLY out of weightage (no scaling: 20% = enter 0-20)
+ * - Subject Total = Σ(all component marks) out of 100
+ * - All weightages MUST sum to exactly 100%
+ * 
+ * DUAL PASSING REQUIREMENT:
+ * - Component Pass: Score >= component passing marks (e.g., 8 out of 20)
+ * - Subject Pass: Total >= subject passing marks (typically 40 out of 100)
+ * - Student FAILS if ANY component is failed (even with passing total)
+ * 
+ * EXAMPLE (CLOUD COMPUTING):
+ * - Internal 1: 20%, Pass 8  → Enter 0-20 (fail if < 8)
+ * - Internal 2: 25%, Pass 10 → Enter 0-25 (fail if < 10)
+ * - Internal 3: 15%, Pass 6  → Enter 0-15 (fail if < 6)
+ * - Final Exam: 40%, Pass 16 → Enter 0-40 (fail if < 16)
+ * - Total: 100%, typically need 40+ to pass subject
+ * 
+ * @see com.sms.dao.AnalyzerDAO#calculateWeightedSubjectTotal
+ * @see WEIGHTED_CALCULATION_SYSTEM.md for full documentation
  */
 public class CreateSectionPanel extends JPanel {
     private JFrame parentFrame;
@@ -105,10 +137,11 @@ public class CreateSectionPanel extends JPanel {
         descriptionArea.setWrapStyleWord(true);
         
         // Initialize subject components
-        subjectTableModel = new DefaultTableModel(new String[]{"Subject Name", "Total Marks", "Credit", "Pass Marks"}, 0) {
+        System.out.println("[DEBUG] Initializing CreateSectionPanel - subject table with 5 columns");
+        subjectTableModel = new DefaultTableModel(new String[]{"Subject Name", "Total Marks", "Credit", "Pass Marks", "Actions"}, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
-                return false;
+                return column == 4; // Only Actions column is editable
             }
         };
         subjectTable = new JTable(subjectTableModel);
@@ -121,11 +154,11 @@ public class CreateSectionPanel extends JPanel {
         patternValidationLabel = new JLabel("Select a subject to configure exam patterns");
         
         currentPatternTableModel = new DefaultTableModel(
-            new String[]{"Component", "Max Marks", "Weightage", "Actions"}, 0
+            new String[]{"Component", "Max Marks", "Weightage (%)", "Passing Marks", "Actions"}, 0
         ) {
             @Override
             public boolean isCellEditable(int row, int column) {
-                return column == 3; // Only Actions column is editable
+                return column == 4; // Only Actions column is editable
             }
         };
         currentPatternTable = new JTable(currentPatternTableModel);
@@ -277,14 +310,102 @@ public class CreateSectionPanel extends JPanel {
     }
     
     private JPanel createSubjectTablePanel() {
+        System.out.println("[DEBUG] Creating subject table panel");
         JPanel panel = UIComponentFactory.createStyledPanel(themeManager.getCardColor(), BORDER_RADIUS);
         panel.setLayout(new BorderLayout());
         panel.setBorder(BorderFactory.createTitledBorder("Added Subjects"));
         
+        // Set row height and column widths
+        subjectTable.setRowHeight(35);
+        System.out.println("[DEBUG] Table has " + subjectTable.getColumnCount() + " columns");
+        
+        if (subjectTable.getColumnCount() >= 5) {
+            subjectTable.getColumnModel().getColumn(0).setPreferredWidth(250); // Subject Name
+            subjectTable.getColumnModel().getColumn(1).setPreferredWidth(120); // Total Marks
+            subjectTable.getColumnModel().getColumn(2).setPreferredWidth(80);  // Credit
+            subjectTable.getColumnModel().getColumn(3).setPreferredWidth(120); // Pass Marks
+            subjectTable.getColumnModel().getColumn(4).setPreferredWidth(200); // Actions - wider for buttons
+            subjectTable.getColumnModel().getColumn(4).setMinWidth(200);
+            
+            // Add cell renderer and editor for the actions column
+            subjectTable.getColumnModel().getColumn(4).setCellRenderer(new SubjectButtonRenderer());
+            subjectTable.getColumnModel().getColumn(4).setCellEditor(new SubjectButtonEditor());
+            System.out.println("[DEBUG] Actions column renderer and editor set");
+        }
+        
+        // Disable auto resize to allow horizontal scrolling
+        subjectTable.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
+        System.out.println("[DEBUG] Table auto-resize disabled for horizontal scrolling");
+        
         JScrollPane scrollPane = new JScrollPane(subjectTable);
         scrollPane.setPreferredSize(new Dimension(0, 200));
+        scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+        scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
+        System.out.println("[DEBUG] ScrollPane created with horizontal scrollbar enabled");
         panel.add(scrollPane, BorderLayout.CENTER);
         
+        // Context menu on right-click: Edit / Remove
+        System.out.println("[DEBUG] Creating context menu for subjects table");
+        JPopupMenu subjectMenu = new JPopupMenu();
+        JMenuItem editItem = new JMenuItem("Edit Subject");
+        JMenuItem removeItem = new JMenuItem("Remove Subject");
+        subjectMenu.add(editItem);
+        subjectMenu.add(removeItem);
+        System.out.println("[DEBUG] Context menu items added");
+        
+        // Attach menu to table
+        subjectTable.setComponentPopupMenu(subjectMenu);
+        System.out.println("[DEBUG] Context menu attached to subject table");
+        
+        // Ensure right-click selects the row under cursor
+        subjectTable.addMouseListener(new java.awt.event.MouseAdapter() {
+            private void selectRow(java.awt.event.MouseEvent e) {
+                int row = subjectTable.rowAtPoint(e.getPoint());
+                System.out.println("[DEBUG] Row at point: " + row);
+                if (row != -1) {
+                    subjectTable.setRowSelectionInterval(row, row);
+                    System.out.println("[DEBUG] Row " + row + " selected");
+                }
+            }
+            
+            @Override
+            public void mousePressed(java.awt.event.MouseEvent e) {
+                System.out.println("[DEBUG] Mouse pressed - isPopupTrigger: " + e.isPopupTrigger());
+                if (e.isPopupTrigger()) selectRow(e);
+            }
+            
+            @Override
+            public void mouseReleased(java.awt.event.MouseEvent e) {
+                System.out.println("[DEBUG] Mouse released - isPopupTrigger: " + e.isPopupTrigger());
+                if (e.isPopupTrigger()) selectRow(e);
+            }
+        });
+        System.out.println("[DEBUG] Mouse listener added");
+        
+        // Hook menu actions
+        editItem.addActionListener(e -> {
+            System.out.println("[DEBUG] Edit Subject clicked");
+            int row = subjectTable.getSelectedRow();
+            System.out.println("[DEBUG] Selected row: " + row);
+            if (row != -1) {
+                showEditSubjectDialog(row);
+            } else {
+                showError("Please select a subject to edit");
+            }
+        });
+        
+        removeItem.addActionListener(e -> {
+            System.out.println("[DEBUG] Remove Subject clicked");
+            int row = subjectTable.getSelectedRow();
+            System.out.println("[DEBUG] Selected row: " + row);
+            if (row != -1) {
+                removeSubjectAtRow(row);
+            } else {
+                showError("Please select a subject to remove");
+            }
+        });
+        
+        System.out.println("[DEBUG] Subject table panel created successfully");
         return panel;
     }
     
@@ -356,10 +477,74 @@ public class CreateSectionPanel extends JPanel {
         panel.setLayout(new BorderLayout());
         panel.setBorder(BorderFactory.createTitledBorder("Exam Pattern Configuration"));
         
+        System.out.println("[DEBUG] Setting up exam pattern table with Actions column");
+        
+        // Set up table with custom renderer and editor for Actions column
+        currentPatternTable.setRowHeight(35);
+        
+        if (currentPatternTable.getColumnCount() >= 5) {
+            currentPatternTable.getColumnModel().getColumn(0).setPreferredWidth(250); // Component
+            currentPatternTable.getColumnModel().getColumn(1).setPreferredWidth(120); // Max Marks
+            currentPatternTable.getColumnModel().getColumn(2).setPreferredWidth(120); // Weightage
+            currentPatternTable.getColumnModel().getColumn(3).setPreferredWidth(120); // Passing Marks
+            currentPatternTable.getColumnModel().getColumn(4).setPreferredWidth(200); // Actions - wider for buttons
+            currentPatternTable.getColumnModel().getColumn(4).setMinWidth(200);
+            
+            // Add cell renderer and editor for the actions column
+            currentPatternTable.getColumnModel().getColumn(4).setCellRenderer(new ComponentButtonRenderer());
+            currentPatternTable.getColumnModel().getColumn(4).setCellEditor(new ComponentButtonEditor());
+            System.out.println("[DEBUG] Exam pattern Actions column renderer and editor set");
+        }
+        
+        // Disable auto-resize for horizontal scrolling
+        currentPatternTable.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
+        
         // Pattern table
         JScrollPane scrollPane = new JScrollPane(currentPatternTable);
+        scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+        scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
         scrollPane.setPreferredSize(new Dimension(0, 200));
         panel.add(scrollPane, BorderLayout.CENTER);
+        
+        // Add right-click context menu
+        JPopupMenu contextMenu = new JPopupMenu();
+        JMenuItem editMenuItem = new JMenuItem("Edit Component");
+        JMenuItem deleteMenuItem = new JMenuItem("Delete Component");
+        
+        editMenuItem.addActionListener(e -> {
+            int row = currentPatternTable.getSelectedRow();
+            if (row >= 0) {
+                System.out.println("[DEBUG] Context menu: Edit component at row " + row);
+                showEditComponentDialog(row);
+            }
+        });
+        
+        deleteMenuItem.addActionListener(e -> {
+            int row = currentPatternTable.getSelectedRow();
+            if (row >= 0) {
+                System.out.println("[DEBUG] Context menu: Remove component at row " + row);
+                removeComponentAtRow(row);
+            }
+        });
+        
+        contextMenu.add(editMenuItem);
+        contextMenu.add(deleteMenuItem);
+        
+        currentPatternTable.setComponentPopupMenu(contextMenu);
+        
+        currentPatternTable.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mousePressed(MouseEvent e) {
+                if (SwingUtilities.isRightMouseButton(e)) {
+                    int row = currentPatternTable.rowAtPoint(e.getPoint());
+                    if (row >= 0) {
+                        currentPatternTable.setRowSelectionInterval(row, row);
+                    }
+                }
+            }
+        });
+        
+        System.out.println("[DEBUG] Exam pattern context menu and mouse listener added");
         
         // Validation and add component
         JPanel bottomPanel = new JPanel(new BorderLayout());
@@ -504,8 +689,13 @@ public class CreateSectionPanel extends JPanel {
     }
     
     private void loadSectionDataForEdit() {
-        if (editSectionId == null) return;
+        System.out.println("[DEBUG] loadSectionDataForEdit called - editSectionId: " + editSectionId);
+        if (editSectionId == null) {
+            System.out.println("[DEBUG] editSectionId is null - skipping load (CREATE mode)");
+            return;
+        }
         
+        System.out.println("[DEBUG] Starting to load section data for EDIT mode");
         try (Connection conn = DatabaseConnection.getConnection()) {
             // Load basic section info
             String sql = "SELECT section_name, total_students, academic_year, semester FROM sections WHERE id = ?";
@@ -530,7 +720,8 @@ public class CreateSectionPanel extends JPanel {
             }
             
             // Load subjects
-            sql = "SELECT s.subject_name, ss.max_marks, ss.credit, ss.passing_marks " +
+            System.out.println("[DEBUG] Loading subjects for section ID: " + editSectionId);
+            sql = "SELECT s.id, s.subject_name, ss.max_marks, ss.credit, ss.passing_marks " +
                   "FROM subjects s " +
                   "JOIN section_subjects ss ON s.id = ss.subject_id " +
                   "WHERE ss.section_id = ?";
@@ -538,17 +729,33 @@ public class CreateSectionPanel extends JPanel {
                 pstmt.setInt(1, editSectionId);
                 ResultSet rs = pstmt.executeQuery();
                 
+                int subjectCount = 0;
                 while (rs.next()) {
+                    subjectCount++;
+                    int subjectId = rs.getInt("id");
                     String subjectName = rs.getString("subject_name");
+                    System.out.println("[DEBUG] Loading subject #" + subjectCount + ": " + subjectName + " (ID: " + subjectId + ")");
+                    
                     subjectTableModel.addRow(new Object[]{
                         subjectName,
                         String.valueOf(rs.getInt("max_marks")),
                         String.valueOf(rs.getInt("credit")),
-                        String.valueOf(rs.getInt("passing_marks"))
+                        String.valueOf(rs.getInt("passing_marks")),
+                        "Edit/Remove"
                     });
                     // Also add to exam patterns combo
                     examPatternsSubjectCombo.addItem(subjectName);
+                    
+                    // Load exam components for this subject
+                    try {
+                        loadExamComponentsForSubject(conn, subjectId, subjectName);
+                    } catch (SQLException e) {
+                        System.err.println("[ERROR] Failed to load components for subject: " + subjectName);
+                        e.printStackTrace();
+                    }
                 }
+                System.out.println("[DEBUG] Finished loading " + subjectCount + " subjects");
+                System.out.println("[DEBUG] subjectExamPatterns map now has " + subjectExamPatterns.size() + " entries");
             }
             
             // Update save button text
@@ -556,7 +763,11 @@ public class CreateSectionPanel extends JPanel {
                 saveButton.setText("Update Section");
             }
             
+            System.out.println("[DEBUG] Finished loadSectionDataForEdit - Final map size: " + subjectExamPatterns.size());
+            System.out.println("[DEBUG] Map keys: " + subjectExamPatterns.keySet());
+            
         } catch (SQLException e) {
+            System.err.println("[ERROR] SQL Exception in loadSectionDataForEdit");
             e.printStackTrace();
             JOptionPane.showMessageDialog(this,
                 "Error loading section data: " + e.getMessage(),
@@ -565,13 +776,112 @@ public class CreateSectionPanel extends JPanel {
         }
     }
     
+    private void loadExamComponentsForSubject(Connection conn, int subjectId, String subjectName) throws SQLException {
+        System.out.println("[DEBUG] Loading exam components for subject: " + subjectName + " (ID: " + subjectId + ")");
+        
+        // Load from subject_exam_types table which stores the configuration
+        // This ensures we see exam types even before marks are entered
+        // Try with max_marks first (new schema), fallback to weightage only (old schema)
+        String sql = "SELECT DISTINCT et.exam_name, et.weightage, et.passing_marks " +
+                     "FROM exam_types et " +
+                     "INNER JOIN subject_exam_types sext ON et.id = sext.exam_type_id " +
+                     "WHERE sext.section_id = ? AND sext.subject_id = ? " +
+                     "ORDER BY et.id";
+        
+        System.out.println("[DEBUG] Executing query with section_id=" + editSectionId + ", subject_id=" + subjectId);
+        
+        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setInt(1, editSectionId);
+            pstmt.setInt(2, subjectId);
+            ResultSet rs = pstmt.executeQuery();
+            
+            List<ExamComponent> components = new ArrayList<>();
+            int componentCount = 0;
+            
+            // Check if max_marks column exists in the database table (not ResultSet)
+            boolean hasMaxMarksColumn = false;
+            try {
+                DatabaseMetaData dbMetaData = conn.getMetaData();
+                ResultSet columns = dbMetaData.getColumns(null, null, "exam_types", "max_marks");
+                hasMaxMarksColumn = columns.next();
+                columns.close();
+                System.out.println("[DEBUG] max_marks column exists in database: " + hasMaxMarksColumn);
+            } catch (SQLException e) {
+                System.out.println("[DEBUG] Could not check for max_marks column: " + e.getMessage());
+            }
+            
+            while (rs.next()) {
+                componentCount++;
+                String componentName = rs.getString("exam_name");
+                int weightage = rs.getInt("weightage");
+                int passingMarks = rs.getInt("passing_marks");
+                
+                // Get max_marks from database if column exists
+                int maxMarks = weightage;  // Default: backward compatibility (Option A)
+                System.out.println("[DEBUG] Initial maxMarks set to weightage: " + maxMarks);
+                
+                if (hasMaxMarksColumn) {
+                    System.out.println("[DEBUG] ✅ max_marks column EXISTS - attempting to load for: " + componentName);
+                    try {
+                        // Re-query with max_marks for this specific exam
+                        String maxMarksQuery = "SELECT et.max_marks FROM exam_types et " +
+                                             "INNER JOIN subject_exam_types sext ON et.id = sext.exam_type_id " +
+                                             "WHERE sext.section_id = ? AND sext.subject_id = ? AND et.exam_name = ?";
+                        try (PreparedStatement ps2 = conn.prepareStatement(maxMarksQuery)) {
+                            ps2.setInt(1, editSectionId);
+                            ps2.setInt(2, subjectId);
+                            ps2.setString(3, componentName);
+                            try (ResultSet rs2 = ps2.executeQuery()) {
+                                if (rs2.next()) {
+                                    int dbMaxMarks = rs2.getInt("max_marks");
+                                    System.out.println("[DEBUG] Database returned max_marks: " + dbMaxMarks);
+                                    if (dbMaxMarks > 0) {
+                                        maxMarks = dbMaxMarks;
+                                        System.out.println("[DEBUG] ✅ Using database max_marks: " + maxMarks);
+                                    } else {
+                                        System.out.println("[DEBUG] ⚠️ Database max_marks is 0, using weightage: " + weightage);
+                                    }
+                                } else {
+                                    System.out.println("[DEBUG] ❌ No result from max_marks query");
+                                }
+                            }
+                        }
+                    } catch (SQLException e) {
+                        System.out.println("[DEBUG] ❌ Error fetching max_marks for " + componentName + ": " + e.getMessage());
+                    }
+                } else {
+                    System.out.println("[DEBUG] ❌ max_marks column DOES NOT EXIST - using weightage");
+                }
+                
+                // Create component with max_marks and weightage
+                ExamComponent component = new ExamComponent(componentName, maxMarks, weightage, passingMarks);
+                components.add(component);
+                System.out.println("[DEBUG] Loaded component #" + componentCount + ": " + componentName + 
+                                 " (Max: " + maxMarks + ", Weightage: " + weightage + "%, Passing: " + passingMarks + ")");
+            }
+            
+            System.out.println("[DEBUG] Total components found for " + subjectName + ": " + componentCount);
+            
+            if (!components.isEmpty()) {
+                subjectExamPatterns.put(subjectName, components);
+                System.out.println("[DEBUG] ✓ Stored " + components.size() + " components for subject: " + subjectName);
+            } else {
+                System.out.println("[DEBUG] ✗ No components found for subject: " + subjectName + " (section: " + editSectionId + ")");
+            }
+        }
+    }
+    
     private void setupEventHandlers() {
         // Subject selection change handler
         examPatternsSubjectCombo.addActionListener(e -> {
+            System.out.println("[DEBUG] Exam patterns combo box selection changed");
             String selectedSubject = getCurrentSelectedSubject();
+            System.out.println("[DEBUG] Selected subject: " + selectedSubject);
             if (selectedSubject != null) {
                 displayPatternForSubject(selectedSubject);
                 validatePattern(selectedSubject);
+            } else {
+                System.out.println("[DEBUG] Selected subject is null");
             }
         });
         
@@ -689,7 +999,7 @@ public class CreateSectionPanel extends JPanel {
                     return;
                 }
                 
-                subjectTableModel.addRow(new Object[]{name, marks, credit, passMarks});
+                subjectTableModel.addRow(new Object[]{name, marks, credit, passMarks, "Edit/Remove"});
                 examPatternsSubjectCombo.addItem(name);
                 dialog.dispose();
                 showSuccess("Subject added successfully");
@@ -746,47 +1056,42 @@ public class CreateSectionPanel extends JPanel {
             return;
         }
         
-        int totalMarks = getSubjectTotalMarks(selectedSubject);
-        if (totalMarks <= 0) {
-            showError("Invalid total marks for subject: " + selectedSubject);
-            return;
-        }
-        
+        // In weighted system, total marks is always 100 (sum of weightages)
+        // Templates define weightage percentages, not absolute marks
         List<ExamComponent> components = new ArrayList<>();
         
         switch (templateName) {
             case "3 Internal + Final (100M)":
-                // Scale to actual marks
-                double scale = totalMarks / 100.0;
-                components.add(new ExamComponent("Internal 1", (int)(20 * scale), (int)(20 * scale)));
-                components.add(new ExamComponent("Internal 2", (int)(25 * scale), (int)(25 * scale)));
-                components.add(new ExamComponent("Internal 3", (int)(15 * scale), (int)(15 * scale)));
-                components.add(new ExamComponent("Final Exam", (int)(40 * scale), (int)(40 * scale)));
+                // Weightages are fixed percentages that sum to 100%
+                components.add(new ExamComponent("Internal 1", 20, 20)); // 20% weightage
+                components.add(new ExamComponent("Internal 2", 25, 25)); // 25% weightage
+                components.add(new ExamComponent("Internal 3", 15, 15)); // 15% weightage
+                components.add(new ExamComponent("Final Exam", 40, 40)); // 40% weightage
                 break;
                 
             case "2 Internal + Final (100M)":
-                scale = totalMarks / 100.0;
-                components.add(new ExamComponent("Internal 1", (int)(25 * scale), (int)(25 * scale)));
-                components.add(new ExamComponent("Internal 2", (int)(25 * scale), (int)(25 * scale)));
-                components.add(new ExamComponent("Final Exam", (int)(50 * scale), (int)(50 * scale)));
+                components.add(new ExamComponent("Internal 1", 25, 25)); // 25% weightage
+                components.add(new ExamComponent("Internal 2", 25, 25)); // 25% weightage
+                components.add(new ExamComponent("Final Exam", 50, 50)); // 50% weightage
                 break;
                 
             case "Theory + Lab (100M)":
-                scale = totalMarks / 100.0;
-                components.add(new ExamComponent("Theory Internal", (int)(20 * scale), (int)(20 * scale)));
-                components.add(new ExamComponent("Theory Final", (int)(50 * scale), (int)(50 * scale)));
-                components.add(new ExamComponent("Lab Internal", (int)(10 * scale), (int)(10 * scale)));
-                components.add(new ExamComponent("Lab Final", (int)(20 * scale), (int)(20 * scale)));
+                components.add(new ExamComponent("Theory Internal", 20, 20)); // 20% weightage
+                components.add(new ExamComponent("Theory Final", 50, 50));    // 50% weightage
+                components.add(new ExamComponent("Lab Internal", 10, 10));    // 10% weightage
+                components.add(new ExamComponent("Lab Final", 20, 20));       // 20% weightage
                 break;
                 
             case "Practical Only (100M)":
-                scale = totalMarks / 100.0;
-                components.add(new ExamComponent("Lab Work", (int)(40 * scale), (int)(40 * scale)));
-                components.add(new ExamComponent("Practical Exam", (int)(60 * scale), (int)(60 * scale)));
+                components.add(new ExamComponent("Lab Work", 40, 40));         // 40% weightage
+                components.add(new ExamComponent("Practical Exam", 60, 60));   // 60% weightage
                 break;
         }
         
+        System.out.println("[DEBUG] Applying template '" + templateName + "' with " + components.size() + " components");
         subjectExamPatterns.put(selectedSubject, components);
+        System.out.println("[DEBUG] Stored components in map for subject: " + selectedSubject);
+        System.out.println("[DEBUG] Map now contains " + subjectExamPatterns.size() + " subjects with patterns");
         displayPattern(components);
         validatePattern(selectedSubject);
         
@@ -819,30 +1124,41 @@ public class CreateSectionPanel extends JPanel {
     }
     
     private void displayPatternForSubject(String subjectName) {
+        System.out.println("[DEBUG] displayPatternForSubject called for: " + subjectName);
+        System.out.println("[DEBUG] Map contains keys: " + subjectExamPatterns.keySet());
         List<ExamComponent> components = subjectExamPatterns.get(subjectName);
+        System.out.println("[DEBUG] Retrieved " + (components == null ? "null" : components.size()) + " components");
         displayPattern(components);
     }
     
     private void displayPattern(List<ExamComponent> components) {
+        System.out.println("[DEBUG] displayPattern called");
         if (currentPatternTableModel == null) {
+            System.out.println("[DEBUG] ERROR: currentPatternTableModel is null!");
             return;
         }
         
         currentPatternTableModel.setRowCount(0);
+        System.out.println("[DEBUG] Cleared table");
         
         if (components == null || components.isEmpty()) {
+            System.out.println("[DEBUG] No components to display (null or empty)");
             return;
         }
         
+        System.out.println("[DEBUG] Adding " + components.size() + " components to table");
         for (ExamComponent component : components) {
             Object[] row = {
                 component.componentName,
                 component.maxMarks,
                 component.weightage,
+                component.passingMarks,
                 "Edit/Remove"
             };
             currentPatternTableModel.addRow(row);
+            System.out.println("[DEBUG] Added row: " + component.componentName);
         }
+        System.out.println("[DEBUG] Table now has " + currentPatternTableModel.getRowCount() + " rows");
         
         validatePattern(getCurrentSelectedSubject());
     }
@@ -859,13 +1175,14 @@ public class CreateSectionPanel extends JPanel {
             return;
         }
         
-        int totalMarks = components.stream().mapToInt(c -> c.maxMarks).sum();
+        // Sum weightages (should equal 100 for weighted system)
+        int totalWeightage = components.stream().mapToInt(c -> c.weightage).sum();
         
-        if (totalMarks == expectedMarks) {
-            patternValidationLabel.setText("✅ Pattern valid (" + totalMarks + "/" + expectedMarks + " marks)");
+        if (totalWeightage == 100) {
+            patternValidationLabel.setText("✅ Pattern valid (" + totalWeightage + "% total weightage)");
             patternValidationLabel.setForeground(new Color(34, 197, 94)); // green
         } else {
-            patternValidationLabel.setText("❌ Invalid total: " + totalMarks + "/" + expectedMarks + " marks");
+            patternValidationLabel.setText("❌ Invalid total: " + totalWeightage + "% (must equal 100%)");
             patternValidationLabel.setForeground(new Color(239, 68, 68)); // red
         }
     }
@@ -887,7 +1204,7 @@ public class CreateSectionPanel extends JPanel {
         }
         
         JDialog dialog = new JDialog(parentFrame, "Add Component - " + subjectName, true);
-        dialog.setSize(400, 250);
+        dialog.setSize(450, 380);
         dialog.setLocationRelativeTo(this);
         
         JPanel content = new JPanel(new GridBagLayout());
@@ -896,6 +1213,7 @@ public class CreateSectionPanel extends JPanel {
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(10, 10, 10, 10);
         gbc.anchor = GridBagConstraints.WEST;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
         
         // Component name
         gbc.gridx = 0; gbc.gridy = 0;
@@ -905,7 +1223,7 @@ public class CreateSectionPanel extends JPanel {
         styleTextField(nameField);
         content.add(nameField, gbc);
         
-        // Marks
+        // Max Marks
         gbc.gridx = 0; gbc.gridy = 1;
         content.add(new JLabel("Max Marks:"), gbc);
         gbc.gridx = 1;
@@ -913,8 +1231,26 @@ public class CreateSectionPanel extends JPanel {
         styleTextField(marksField);
         content.add(marksField, gbc);
         
-        // Buttons
+        // Weightage
         gbc.gridx = 0; gbc.gridy = 2;
+        JLabel weightageLabel = new JLabel("<html>Weightage (%):<br><small>Contribution to subject total</small></html>");
+        content.add(weightageLabel, gbc);
+        gbc.gridx = 1;
+        JTextField weightageField = new JTextField(10);
+        styleTextField(weightageField);
+        content.add(weightageField, gbc);
+        
+        // Passing Marks
+        gbc.gridx = 0; gbc.gridy = 3;
+        JLabel passingLabel = new JLabel("<html>Passing Marks:<br><small>Minimum marks to pass</small></html>");
+        content.add(passingLabel, gbc);
+        gbc.gridx = 1;
+        JTextField passingField = new JTextField(10);
+        styleTextField(passingField);
+        content.add(passingField, gbc);
+        
+        // Buttons
+        gbc.gridx = 0; gbc.gridy = 4;
         gbc.gridwidth = 2;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         
@@ -925,16 +1261,31 @@ public class CreateSectionPanel extends JPanel {
         addBtn.addActionListener(e -> {
             String name = nameField.getText().trim();
             String marksText = marksField.getText().trim();
+            String weightageText = weightageField.getText().trim();
+            String passingText = passingField.getText().trim();
             
-            if (name.isEmpty() || marksText.isEmpty()) {
+            if (name.isEmpty() || marksText.isEmpty() || weightageText.isEmpty() || passingText.isEmpty()) {
                 showError("Please fill in all fields");
                 return;
             }
             
             try {
                 int marks = Integer.parseInt(marksText);
-                if (marks <= 0) {
-                    showError("Marks must be positive");
+                int weightage = Integer.parseInt(weightageText);
+                int passing = Integer.parseInt(passingText);
+                
+                if (marks <= 0 || weightage <= 0 || passing < 0) {
+                    showError("Marks and weightage must be positive");
+                    return;
+                }
+                
+                if (passing > marks) {
+                    showError("Passing marks cannot exceed max marks");
+                    return;
+                }
+                
+                if (weightage > 100) {
+                    showError("Weightage cannot exceed 100%");
                     return;
                 }
                 
@@ -944,7 +1295,7 @@ public class CreateSectionPanel extends JPanel {
                     subjectExamPatterns.put(subjectName, components);
                 }
                 
-                components.add(new ExamComponent(name, marks, marks));
+                components.add(new ExamComponent(name, marks, weightage, passing));
                 displayPattern(components);
                 validatePattern(subjectName);
                 
@@ -952,7 +1303,7 @@ public class CreateSectionPanel extends JPanel {
                 showSuccess("Component added successfully");
                 
             } catch (NumberFormatException ex) {
-                showError("Please enter a valid number for marks");
+                showError("Please enter valid numbers");
             }
         });
         
@@ -1162,15 +1513,37 @@ public class CreateSectionPanel extends JPanel {
                     int subjectId = getSubjectId(conn, subjectInfo.name);
                     
                     if (subjectId > 0) {
+                        // Check if max_marks column exists (backward compatibility)
+                        DatabaseMetaData metaData = conn.getMetaData();
+                        ResultSet columns = metaData.getColumns(null, null, "exam_types", "max_marks");
+                        boolean hasMaxMarksColumn = columns.next();
+                        columns.close();
+                        
                         // Insert exam types and link them to subject
                         for (ExamComponent component : components) {
-                            // Insert into exam_types table
-                            String insertExamType = "INSERT INTO exam_types (section_id, exam_name, weightage, created_by) VALUES (?, ?, ?, ?)";
+                            String insertExamType;
+                            if (hasMaxMarksColumn) {
+                                // Option B: Scaled system with separate max_marks and weightage
+                                insertExamType = "INSERT INTO exam_types (section_id, exam_name, max_marks, weightage, passing_marks, created_by) VALUES (?, ?, ?, ?, ?, ?)";
+                            } else {
+                                // Option A: Direct entry system (weightage = max_marks)
+                                insertExamType = "INSERT INTO exam_types (section_id, exam_name, weightage, passing_marks, created_by) VALUES (?, ?, ?, ?, ?)";
+                            }
+                            
                             try (PreparedStatement ps = conn.prepareStatement(insertExamType, PreparedStatement.RETURN_GENERATED_KEYS)) {
                                 ps.setInt(1, sectionId);
                                 ps.setString(2, component.componentName);
-                                ps.setInt(3, component.weightage);
-                                ps.setInt(4, userId);
+                                
+                                if (hasMaxMarksColumn) {
+                                    ps.setInt(3, component.maxMarks);   // Exam paper max marks
+                                    ps.setInt(4, component.weightage);  // Contribution to 100
+                                    ps.setInt(5, component.passingMarks);
+                                    ps.setInt(6, userId);
+                                } else {
+                                    ps.setInt(3, component.weightage);  // Use weightage only
+                                    ps.setInt(4, component.passingMarks);
+                                    ps.setInt(5, userId);
+                                }
                                 ps.executeUpdate();
                                 
                                 // Get the generated exam_type_id
@@ -1224,21 +1597,641 @@ public class CreateSectionPanel extends JPanel {
         JOptionPane.showMessageDialog(this, message, "Success", JOptionPane.INFORMATION_MESSAGE);
     }
     
+    // Method to show edit subject dialog with pre-filled values
+    private void showEditSubjectDialog(int row) {
+        System.out.println("[DEBUG] Opening edit dialog for row: " + row);
+        String subjectName = (String) subjectTableModel.getValueAt(row, 0);
+        String totalMarksStr = subjectTableModel.getValueAt(row, 1).toString();
+        String creditStr = subjectTableModel.getValueAt(row, 2).toString();
+        String passMarksStr = subjectTableModel.getValueAt(row, 3).toString();
+        
+        // Create dialog
+        JDialog editDialog = new JDialog((Frame) SwingUtilities.getWindowAncestor(this), "Edit Subject", true);
+        editDialog.setLayout(new BorderLayout(10, 10));
+        
+        JPanel formPanel = new JPanel(new GridBagLayout());
+        formPanel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+        formPanel.setBackground(themeManager.getCardColor());
+        
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.insets = new Insets(5, 5, 5, 5);
+        
+        // Subject Name (pre-filled)
+        gbc.gridx = 0; gbc.gridy = 0;
+        JLabel subjectLabel = new JLabel("Subject Name:");
+        formPanel.add(subjectLabel, gbc);
+        
+        gbc.gridx = 1;
+        JTextField subjectField = new JTextField(subjectName, 20);
+        formPanel.add(subjectField, gbc);
+        
+        // Total Marks (pre-filled)
+        gbc.gridx = 0; gbc.gridy = 1;
+        JLabel marksLabel = new JLabel("Total Marks:");
+        formPanel.add(marksLabel, gbc);
+        
+        gbc.gridx = 1;
+        JTextField marksField = new JTextField(totalMarksStr, 20);
+        formPanel.add(marksField, gbc);
+        
+        // Credit (pre-filled)
+        gbc.gridx = 0; gbc.gridy = 2;
+        JLabel creditLabel = new JLabel("Credit:");
+        formPanel.add(creditLabel, gbc);
+        
+        gbc.gridx = 1;
+        JTextField creditField = new JTextField(creditStr, 20);
+        formPanel.add(creditField, gbc);
+        
+        // Pass Marks (pre-filled)
+        gbc.gridx = 0; gbc.gridy = 3;
+        JLabel passLabel = new JLabel("Pass Marks:");
+        formPanel.add(passLabel, gbc);
+        
+        gbc.gridx = 1;
+        JTextField passField = new JTextField(passMarksStr, 20);
+        formPanel.add(passField, gbc);
+        
+        // Buttons
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        buttonPanel.setBackground(themeManager.getCardColor());
+        
+        JButton saveBtn = new JButton("Save");
+        JButton cancelBtn = new JButton("Cancel");
+        
+        saveBtn.addActionListener(e -> {
+            String newName = subjectField.getText().trim();
+            if (newName.isEmpty()) {
+                JOptionPane.showMessageDialog(editDialog, "Subject name cannot be empty!");
+                return;
+            }
+            
+            try {
+                String newTotalMarks = marksField.getText().trim();
+                String newCredit = creditField.getText().trim();
+                String newPassMarks = passField.getText().trim();
+                
+                // Update table model
+                subjectTableModel.setValueAt(newName, row, 0);
+                subjectTableModel.setValueAt(newTotalMarks, row, 1);
+                subjectTableModel.setValueAt(newCredit, row, 2);
+                subjectTableModel.setValueAt(newPassMarks, row, 3);
+                
+                System.out.println("[DEBUG] Updated subject: " + newName);
+                editDialog.dispose();
+                JOptionPane.showMessageDialog(this, "Subject updated successfully!");
+            } catch (Exception ex) {
+                JOptionPane.showMessageDialog(editDialog, "Please enter valid data!");
+            }
+        });
+        
+        cancelBtn.addActionListener(e -> editDialog.dispose());
+        
+        buttonPanel.add(saveBtn);
+        buttonPanel.add(cancelBtn);
+        
+        editDialog.add(formPanel, BorderLayout.CENTER);
+        editDialog.add(buttonPanel, BorderLayout.SOUTH);
+        editDialog.pack();
+        editDialog.setLocationRelativeTo(this);
+        editDialog.setVisible(true);
+    }
+    
+    // Method to remove subject from table
+    private void removeSubjectAtRow(int row) {
+        System.out.println("[DEBUG] Removing subject at row: " + row);
+        int confirm = JOptionPane.showConfirmDialog(this,
+                "Are you sure you want to remove this subject?",
+                "Confirm Removal",
+                JOptionPane.YES_NO_OPTION);
+        
+        if (confirm == JOptionPane.YES_OPTION) {
+            String subjectName = (String) subjectTableModel.getValueAt(row, 0);
+            
+            // Remove from table
+            subjectTableModel.removeRow(row);
+            
+            // Remove from subject combo
+            examPatternsSubjectCombo.removeItem(subjectName);
+            
+            System.out.println("[DEBUG] Subject removed successfully");
+            JOptionPane.showMessageDialog(this, "Subject removed successfully!");
+        }
+    }
+    
+    // Method to show edit component dialog with pre-filled values
+    private void showEditComponentDialog(int row) {
+        String subjectName = getCurrentSelectedSubject();
+        if (subjectName == null) {
+            showError("Please select a subject first");
+            return;
+        }
+        
+        System.out.println("[DEBUG] Opening edit dialog for component at row: " + row);
+        String componentName = (String) currentPatternTableModel.getValueAt(row, 0);
+        String maxMarksStr = currentPatternTableModel.getValueAt(row, 1).toString();
+        String weightageStr = currentPatternTableModel.getValueAt(row, 2).toString();
+        
+        // Get passing marks from table or in-memory structure
+        int passingMarks = 0;
+        if (currentPatternTableModel.getColumnCount() >= 4) {
+            Object passingValue = currentPatternTableModel.getValueAt(row, 3);
+            if (passingValue != null) {
+                passingMarks = Integer.parseInt(passingValue.toString());
+            }
+        } else {
+            // Fallback to in-memory structure
+            List<ExamComponent> components = subjectExamPatterns.get(subjectName);
+            if (components != null && row < components.size()) {
+                passingMarks = components.get(row).passingMarks;
+            }
+        }
+        
+        JDialog editDialog = new JDialog((Frame) SwingUtilities.getWindowAncestor(this), "Edit Component", true);
+        editDialog.setLayout(new BorderLayout(10, 10));
+        
+        JPanel formPanel = new JPanel(new GridBagLayout());
+        formPanel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+        formPanel.setBackground(themeManager.getCardColor());
+        
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.insets = new Insets(5, 5, 5, 5);
+        
+        // Component Name
+        gbc.gridx = 0; gbc.gridy = 0;
+        JLabel nameLabel = new JLabel("Component Name:");
+        formPanel.add(nameLabel, gbc);
+        
+        gbc.gridx = 1;
+        JTextField nameField = new JTextField(componentName, 20);
+        formPanel.add(nameField, gbc);
+        
+        // Max Marks
+        gbc.gridx = 0; gbc.gridy = 1;
+        JLabel marksLabel = new JLabel("Max Marks:");
+        formPanel.add(marksLabel, gbc);
+        
+        gbc.gridx = 1;
+        JTextField marksField = new JTextField(maxMarksStr, 20);
+        formPanel.add(marksField, gbc);
+        
+        // Weightage
+        gbc.gridx = 0; gbc.gridy = 2;
+        JLabel weightageLabel = new JLabel("<html>Weightage (%):<br><small>Contribution to subject total</small></html>");
+        formPanel.add(weightageLabel, gbc);
+        
+        gbc.gridx = 1;
+        JTextField weightageField = new JTextField(weightageStr, 20);
+        formPanel.add(weightageField, gbc);
+        
+        // Passing Marks
+        gbc.gridx = 0; gbc.gridy = 3;
+        JLabel passingLabel = new JLabel("<html>Passing Marks:<br><small>Minimum marks to pass</small></html>");
+        formPanel.add(passingLabel, gbc);
+        
+        gbc.gridx = 1;
+        JTextField passingField = new JTextField(String.valueOf(passingMarks), 20);
+        formPanel.add(passingField, gbc);
+        
+        // Buttons
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        buttonPanel.setBackground(themeManager.getCardColor());
+        
+        JButton saveBtn = new JButton("Save");
+        JButton cancelBtn = new JButton("Cancel");
+        
+        saveBtn.addActionListener(e -> {
+            String newName = nameField.getText().trim();
+            if (newName.isEmpty()) {
+                JOptionPane.showMessageDialog(editDialog, "Component name cannot be empty!");
+                return;
+            }
+            
+            try {
+                int newMarks = Integer.parseInt(marksField.getText().trim());
+                int newWeightage = Integer.parseInt(weightageField.getText().trim());
+                int newPassing = Integer.parseInt(passingField.getText().trim());
+                
+                if (newMarks <= 0 || newWeightage <= 0 || newPassing < 0) {
+                    JOptionPane.showMessageDialog(editDialog, "Marks and weightage must be positive!");
+                    return;
+                }
+                
+                if (newPassing > newMarks) {
+                    JOptionPane.showMessageDialog(editDialog, "Passing marks cannot exceed max marks!");
+                    return;
+                }
+                
+                if (newWeightage > 100) {
+                    JOptionPane.showMessageDialog(editDialog, "Weightage cannot exceed 100%!");
+                    return;
+                }
+                
+                // Update table model
+                currentPatternTableModel.setValueAt(newName, row, 0);
+                currentPatternTableModel.setValueAt(newMarks, row, 1);
+                currentPatternTableModel.setValueAt(newWeightage, row, 2);
+                currentPatternTableModel.setValueAt(newPassing, row, 3);
+                
+                // Update in-memory structure
+                List<ExamComponent> compList = subjectExamPatterns.get(subjectName);
+                if (compList != null && row < compList.size()) {
+                    ExamComponent comp = compList.get(row);
+                    comp.componentName = newName;
+                    comp.maxMarks = newMarks;
+                    comp.weightage = newWeightage;
+                    comp.passingMarks = newPassing;
+                }
+                
+                // *** UPDATE DATABASE IF SECTION IS ALREADY SAVED ***
+                if (editSectionId != null && editSectionId > 0) {  // Only update DB if this is an existing section
+                    updateExamTypeInDatabase(componentName, newName, newMarks, newWeightage, newPassing, subjectName);
+                }
+                
+                validatePattern(subjectName);
+                
+                System.out.println("[DEBUG] Updated component: " + newName);
+                editDialog.dispose();
+                JOptionPane.showMessageDialog(this, "Component updated successfully!");
+            } catch (NumberFormatException ex) {
+                JOptionPane.showMessageDialog(editDialog, "Please enter valid numbers!");
+            }
+        });
+        
+        cancelBtn.addActionListener(e -> editDialog.dispose());
+        
+        buttonPanel.add(saveBtn);
+        buttonPanel.add(cancelBtn);
+        
+        editDialog.add(formPanel, BorderLayout.CENTER);
+        editDialog.add(buttonPanel, BorderLayout.SOUTH);
+        editDialog.pack();
+        editDialog.setLocationRelativeTo(this);
+        editDialog.setVisible(true);
+    }
+    
+    // Method to remove component from table
+    private void removeComponentAtRow(int row) {
+        String subjectName = getCurrentSelectedSubject();
+        if (subjectName == null) {
+            showError("Please select a subject first");
+            return;
+        }
+        
+        System.out.println("[DEBUG] Removing component at row: " + row);
+        int confirm = JOptionPane.showConfirmDialog(this,
+                "Are you sure you want to remove this component?",
+                "Confirm Removal",
+                JOptionPane.YES_NO_OPTION);
+        
+        if (confirm == JOptionPane.YES_OPTION) {
+            // Remove from in-memory structure
+            List<ExamComponent> components = subjectExamPatterns.get(subjectName);
+            if (components != null && row < components.size()) {
+                ExamComponent removed = components.remove(row);
+                System.out.println("[DEBUG] Removed component: " + removed.componentName);
+                
+                // Update display
+                displayPattern(components);
+                validatePattern(subjectName);
+                
+                System.out.println("[DEBUG] Component removed successfully");
+            }
+        }
+    }
+    
+    /**
+     * Updates an exam type in the database when editing an existing section
+     * @param oldName Old component name (to identify which record to update)
+     * @param newName New component name
+     * @param newMaxMarks New max marks
+     * @param newWeightage New weightage percentage
+     * @param newPassingMarks New passing marks
+     * @param subjectName Subject this component belongs to
+     */
+    private void updateExamTypeInDatabase(String oldName, String newName, int newMaxMarks, 
+                                         int newWeightage, int newPassingMarks, String subjectName) {
+        try (Connection conn = DatabaseConnection.getConnection()) {
+            // Get subject_id
+            int subjectId = getSubjectId(conn, subjectName);
+            if (subjectId <= 0) {
+                System.err.println("Could not find subject: " + subjectName);
+                return;
+            }
+            
+            // Find the exam_type_id through subject_exam_types table
+            String findQuery = "SELECT et.id FROM exam_types et " +
+                             "JOIN subject_exam_types sext ON et.id = sext.exam_type_id " +
+                             "WHERE et.section_id = ? AND sext.subject_id = ? AND et.exam_name = ?";
+            
+            int examTypeId = -1;
+            try (PreparedStatement ps = conn.prepareStatement(findQuery)) {
+                ps.setInt(1, editSectionId);
+                ps.setInt(2, subjectId);
+                ps.setString(3, oldName);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        examTypeId = rs.getInt("id");
+                    }
+                }
+            }
+            
+            if (examTypeId > 0) {
+                // Check if max_marks column exists
+                DatabaseMetaData dbMetaData = conn.getMetaData();
+                ResultSet rsColumns = dbMetaData.getColumns(null, null, "exam_types", "max_marks");
+                boolean hasMaxMarksColumn = rsColumns.next();
+                rsColumns.close();
+                
+                System.out.println("[DEBUG] max_marks column exists for UPDATE: " + hasMaxMarksColumn);
+                
+                // Update the exam_type record - with or without max_marks column
+                String updateQuery;
+                if (hasMaxMarksColumn) {
+                    updateQuery = "UPDATE exam_types SET exam_name = ?, max_marks = ?, weightage = ?, passing_marks = ? WHERE id = ?";
+                } else {
+                    // Backward compatibility: update without max_marks
+                    updateQuery = "UPDATE exam_types SET exam_name = ?, weightage = ?, passing_marks = ? WHERE id = ?";
+                }
+                
+                try (PreparedStatement ps = conn.prepareStatement(updateQuery)) {
+                    ps.setString(1, newName);
+                    if (hasMaxMarksColumn) {
+                        ps.setInt(2, newMaxMarks);
+                        ps.setInt(3, newWeightage);
+                        ps.setInt(4, newPassingMarks);
+                        ps.setInt(5, examTypeId);
+                    } else {
+                        ps.setInt(2, newWeightage);
+                        ps.setInt(3, newPassingMarks);
+                        ps.setInt(4, examTypeId);
+                    }
+                    int rowsUpdated = ps.executeUpdate();
+                    
+                    if (rowsUpdated > 0) {
+                        if (hasMaxMarksColumn) {
+                            System.out.println("✅ Database updated: " + oldName + " -> " + newName + 
+                                             " (max: " + newMaxMarks + ", weightage: " + newWeightage + "%, passing: " + newPassingMarks + ")");
+                        } else {
+                            System.out.println("✅ Database updated (no max_marks column): " + oldName + " -> " + newName + 
+                                             " (weightage: " + newWeightage + "%, passing: " + newPassingMarks + ")");
+                        }
+                    } else {
+                        System.err.println("❌ No rows updated for exam_type_id: " + examTypeId);
+                    }
+                }
+            } else {
+                System.err.println("❌ Could not find exam type with name: " + oldName + " for subject: " + subjectName);
+            }
+            
+        } catch (SQLException e) {
+            System.err.println("❌ Error updating exam type in database: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+    
+    // Inner class for rendering action buttons in exam pattern table
+    private class ComponentButtonRenderer extends JPanel implements TableCellRenderer {
+        private JButton editButton;
+        private JButton removeButton;
+        
+        public ComponentButtonRenderer() {
+            setLayout(new FlowLayout(FlowLayout.CENTER, 5, 0));
+            setOpaque(true);
+            
+            editButton = new JButton("Edit");
+            editButton.setPreferredSize(new Dimension(70, 25));
+            editButton.setBackground(new Color(52, 152, 219));
+            editButton.setForeground(Color.WHITE);
+            editButton.setFocusPainted(false);
+            editButton.setBorderPainted(false);
+            
+            removeButton = new JButton("Remove");
+            removeButton.setPreferredSize(new Dimension(80, 25));
+            removeButton.setBackground(new Color(231, 76, 60));
+            removeButton.setForeground(Color.WHITE);
+            removeButton.setFocusPainted(false);
+            removeButton.setBorderPainted(false);
+            
+            add(editButton);
+            add(removeButton);
+        }
+        
+        @Override
+        public Component getTableCellRendererComponent(JTable table, Object value,
+                boolean isSelected, boolean hasFocus, int row, int column) {
+            if (isSelected) {
+                setBackground(table.getSelectionBackground());
+            } else {
+                setBackground(table.getBackground());
+            }
+            return this;
+        }
+    }
+    
+    // Inner class for editing action buttons in exam pattern table
+    private class ComponentButtonEditor extends AbstractCellEditor implements TableCellEditor {
+        private JPanel panel;
+        private JButton editButton;
+        private JButton removeButton;
+        private int currentRow;
+        
+        public ComponentButtonEditor() {
+            panel = new JPanel(new FlowLayout(FlowLayout.CENTER, 5, 0));
+            panel.setOpaque(true);
+            
+            editButton = new JButton("Edit");
+            editButton.setPreferredSize(new Dimension(70, 25));
+            editButton.setBackground(new Color(52, 152, 219));
+            editButton.setForeground(Color.WHITE);
+            editButton.setFocusPainted(false);
+            editButton.setBorderPainted(false);
+            
+            removeButton = new JButton("Remove");
+            removeButton.setPreferredSize(new Dimension(80, 25));
+            removeButton.setBackground(new Color(231, 76, 60));
+            removeButton.setForeground(Color.WHITE);
+            removeButton.setFocusPainted(false);
+            removeButton.setBorderPainted(false);
+            
+            editButton.addActionListener(e -> {
+                System.out.println("[DEBUG] Edit button clicked for component row: " + currentRow);
+                fireEditingStopped();
+                showEditComponentDialog(currentRow);
+            });
+            
+            removeButton.addActionListener(e -> {
+                System.out.println("[DEBUG] Remove button clicked for component row: " + currentRow);
+                fireEditingStopped();
+                removeComponentAtRow(currentRow);
+            });
+            
+            panel.add(editButton);
+            panel.add(removeButton);
+        }
+        
+        @Override
+        public Component getTableCellEditorComponent(JTable table, Object value,
+                boolean isSelected, int row, int column) {
+            currentRow = row;
+            panel.setBackground(table.getSelectionBackground());
+            return panel;
+        }
+        
+        @Override
+        public Object getCellEditorValue() {
+            return "Edit/Remove";
+        }
+    }
+    
+    // Inner class for rendering action buttons in subject table
+    private class SubjectButtonRenderer extends JPanel implements TableCellRenderer {
+        private JButton editButton;
+        private JButton removeButton;
+        
+        public SubjectButtonRenderer() {
+            setLayout(new FlowLayout(FlowLayout.CENTER, 5, 0));
+            setOpaque(true);
+            
+            editButton = new JButton("Edit");
+            editButton.setPreferredSize(new Dimension(70, 25));
+            editButton.setBackground(new Color(52, 152, 219));
+            editButton.setForeground(Color.WHITE);
+            editButton.setFocusPainted(false);
+            editButton.setBorderPainted(false);
+            
+            removeButton = new JButton("Remove");
+            removeButton.setPreferredSize(new Dimension(80, 25));
+            removeButton.setBackground(new Color(231, 76, 60));
+            removeButton.setForeground(Color.WHITE);
+            removeButton.setFocusPainted(false);
+            removeButton.setBorderPainted(false);
+            
+            add(editButton);
+            add(removeButton);
+        }
+        
+        @Override
+        public Component getTableCellRendererComponent(JTable table, Object value,
+                boolean isSelected, boolean hasFocus, int row, int column) {
+            if (isSelected) {
+                setBackground(table.getSelectionBackground());
+            } else {
+                setBackground(table.getBackground());
+            }
+            return this;
+        }
+    }
+    
+    // Inner class for editing action buttons in table
+    private class SubjectButtonEditor extends AbstractCellEditor implements TableCellEditor {
+        private JPanel panel;
+        private JButton editButton;
+        private JButton removeButton;
+        private int currentRow;
+        
+        public SubjectButtonEditor() {
+            panel = new JPanel(new FlowLayout(FlowLayout.CENTER, 5, 0));
+            panel.setOpaque(true);
+            
+            editButton = new JButton("Edit");
+            editButton.setPreferredSize(new Dimension(70, 25));
+            editButton.setBackground(new Color(52, 152, 219));
+            editButton.setForeground(Color.WHITE);
+            editButton.setFocusPainted(false);
+            editButton.setBorderPainted(false);
+            
+            removeButton = new JButton("Remove");
+            removeButton.setPreferredSize(new Dimension(80, 25));
+            removeButton.setBackground(new Color(231, 76, 60));
+            removeButton.setForeground(Color.WHITE);
+            removeButton.setFocusPainted(false);
+            removeButton.setBorderPainted(false);
+            
+            editButton.addActionListener(e -> {
+                System.out.println("[DEBUG] Edit button clicked for row: " + currentRow);
+                fireEditingStopped();
+                showEditSubjectDialog(currentRow);
+            });
+            
+            removeButton.addActionListener(e -> {
+                System.out.println("[DEBUG] Remove button clicked for row: " + currentRow);
+                fireEditingStopped();
+                removeSubjectAtRow(currentRow);
+            });
+            
+            panel.add(editButton);
+            panel.add(removeButton);
+        }
+        
+        @Override
+        public Component getTableCellEditorComponent(JTable table, Object value,
+                boolean isSelected, int row, int column) {
+            currentRow = row;
+            panel.setBackground(table.getSelectionBackground());
+            return panel;
+        }
+        
+        @Override
+        public Object getCellEditorValue() {
+            return "Edit/Remove";
+        }
+    }
+    
     // Inner classes for exam structure (same as original dialog)
+    /**
+     * ExamComponent represents an exam component in the SCALED grading system (Option B).
+     * 
+     * SCALED GRADING SYSTEM (Current Implementation):
+     * - componentName: Component name (e.g., "Internal 1", "Final Exam")
+     * - maxMarks: EXAM PAPER max marks (e.g., 50 marks on physical exam paper)
+     * - weightage: Contribution % to subject total (must sum to 100% across all components)
+     * - passingMarks: Minimum SCALED marks to pass THIS component
+     * 
+     * SCALING FORMULA:
+     * - Scaled Contribution = (marks_obtained / maxMarks) × weightage
+     * - Enter marks out of maxMarks, system auto-scales to weightage
+     * 
+     * CRITICAL RULES:
+     * - Subject Total = Σ(all scaled contributions) out of 100
+     * - DUAL PASSING: Must pass EACH component AND overall subject
+     * - Failing ANY single component = SUBJECT FAIL (even if total passes)
+     * 
+     * EXAMPLE (CLOUD COMPUTING with 50-mark internal exams):
+     * - Internal 1: maxMarks=50, weightage=20%, passingMarks=20 (40% of 50)
+     *   → Student scores 40/50 → Scaled: (40/50)×20 = 16/20 ✅ PASS
+     * - Internal 2: maxMarks=50, weightage=25%, passingMarks=25 (50% of 50)
+     *   → Student scores 15/50 → Scaled: (15/50)×25 = 7.5/25 ❌ FAIL (< 25)
+     * - Final: maxMarks=100, weightage=40%, passingMarks=40
+     *   → Student scores 80/100 → Scaled: (80/100)×40 = 32/40 ✅ PASS
+     * 
+     * Formula: Subject Total = Σ(marks_obtained/maxMarks × weightage) out of 100
+     */
     private static class ExamComponent {
         String componentName;
-        int maxMarks;
-        int weightage;
+        int maxMarks;      // Exam paper max marks (e.g., 50, 100)
+        int weightage;     // Contribution % to subject total (out of 100)
+        int passingMarks;  // Minimum marks to pass this component (on original scale)
         
         ExamComponent(String componentName, int maxMarks, int weightage) {
             this.componentName = componentName;
             this.maxMarks = maxMarks;
             this.weightage = weightage;
+            this.passingMarks = (int)(maxMarks * 0.4); // Default 40%
+        }
+        
+        ExamComponent(String componentName, int maxMarks, int weightage, int passingMarks) {
+            this.componentName = componentName;
+            this.maxMarks = maxMarks;
+            this.weightage = weightage;
+            this.passingMarks = passingMarks;
         }
         
         @Override
         public String toString() {
-            return componentName + " (" + maxMarks + "M, " + weightage + "%)";  
+            return componentName + " (" + maxMarks + "M, " + weightage + "%, Pass: " + passingMarks + ")";  
         }
     }
 }

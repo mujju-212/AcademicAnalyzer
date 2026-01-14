@@ -19,7 +19,7 @@ import com.sms.analyzer.Student;
  * KEY CONCEPTS:
  * 1. Weightage % = Max marks for component (20% weightage = enter 0-20 marks)
  * 2. Marks entered DIRECTLY out of weightage (NO scaling/conversion)
- * 3. Subject Total = ??(all component marks obtained) out of 100
+ * 3. Subject Total = Σ(all component marks obtained) out of 100
  * 4. All component weightages MUST sum to 100%
  * 
  * DUAL PASSING REQUIREMENT:
@@ -28,14 +28,14 @@ import com.sms.analyzer.Student;
  * - Failure Condition: Failing ANY component = SUBJECT FAIL (even if total passes)
  * 
  * REALISTIC EXAMPLE (CLOUD COMPUTING):
- * - Internal 1: 20%, Pass 8  ??? Student enters 0-20, must score >= 8
- * - Internal 2: 25%, Pass 10 ??? Student enters 0-25, must score >= 10
- * - Internal 3: 15%, Pass 6  ??? Student enters 0-15, must score >= 6
- * - Final Exam: 40%, Pass 16 ??? Student enters 0-40, must score >= 16
+ * - Internal 1: 20%, Pass 8  → Student enters 0-20, must score >= 8
+ * - Internal 2: 25%, Pass 10 → Student enters 0-25, must score >= 10
+ * - Internal 3: 15%, Pass 6  → Student enters 0-15, must score >= 6
+ * - Final Exam: 40%, Pass 16 → Student enters 0-40, must score >= 16
  * - Subject Total = Int1 + Int2 + Int3 + Final (out of 100, need >= 40)
  * 
- * Pass Scenario: 18 + 22 + 13 + 35 = 88/100 ??? (all components passed)
- * Fail Scenario: 5 + 24 + 14 + 38 = 81/100 ??? (Int1 failed: 5 < 8)
+ * Pass Scenario: 18 + 22 + 13 + 35 = 88/100 ✅ (all components passed)
+ * Fail Scenario: 5 + 24 + 14 + 38 = 81/100 ❌ (Int1 failed: 5 < 8)
  * 
  * See WEIGHTED_CALCULATION_SYSTEM.md for complete documentation.
  */
@@ -70,6 +70,10 @@ public class AnalyzerDAO {
                 student.setSection(rs.getString("section_name"));
                 
                 // Debug output
+                System.out.println("Student found: " + rs.getString("student_name"));
+                System.out.println("Student ID: " + studentId);
+                System.out.println("Section ID: " + sectionId);
+                System.out.println("Marks map size: " + marks.size());
             }
             
             rs.close();
@@ -183,16 +187,20 @@ public class AnalyzerDAO {
                 marks.putIfAbsent(subjectName, new HashMap<>());
                 marks.get(subjectName).put(examName, marksObtained);
                 
+                System.out.println("  [" + rowCount + "] Subject: " + subjectName + ", Exam: " + examName + ", Marks: " + marksObtained);
             }
             
             if (rowCount == 0) {
-                // No marks found for this student
-
+                System.out.println("⚠️  NO MARKS FOUND for student ID " + studentId);
+                System.out.println("    This student may not have any marks entered yet.");
+                System.out.println("    Marks data exists for students 132-181 in section A ISE (50 students)");
             } else {
+                System.out.println("✅ Total rows fetched: " + rowCount);
             }
             rs.close();
             ps.close();
             
+            System.out.println("Total subjects with marks: " + marks.size());
             
         } catch (SQLException e) {
             e.printStackTrace();
@@ -202,7 +210,7 @@ public class AnalyzerDAO {
     
     /**
      * Calculate weighted total marks for a subject
-     * Formula: Sum of ((obtained_marks / max_marks) ?? weightage) for all components
+     * Formula: Sum of ((obtained_marks / max_marks) × weightage) for all components
      * @param studentId Student ID
      * @param subjectId Subject ID
      * @param sectionId Section ID
@@ -330,6 +338,7 @@ public class AnalyzerDAO {
                     // DEBUG for students 166, 170, 171 in GEN AI
                     boolean debugThis = (studentId == 166 || studentId == 170 || studentId == 171) && subject.name.equals("GEN AI");
                     if (debugThis) {
+                        System.out.println("\n$$$ COMPONENT DEBUG - Student " + studentId + " - GEN AI");
                     }
                     
                     double weightedTotal = 0.0;
@@ -340,6 +349,7 @@ public class AnalyzerDAO {
                         // Skip if filter active and exam not selected
                         if (examFilter != null && !examFilter.contains(examType.examName)) {
                             if (debugThis) {
+                                System.out.println("$$$ SKIPPED by filter: " + examType.examName);
                             }
                             continue;
                         }
@@ -350,9 +360,11 @@ public class AnalyzerDAO {
                             if (marksObtained < examType.passingMarks) {
                                 allComponentsPassed = false;
                                 if (debugThis) {
+                                    System.out.println("$$$ COMPONENT FAILED: " + examType.examName + " = " + marksObtained + "/" + examType.maxMarks + " (passing: " + examType.passingMarks + ")");
                                 }
                             } else {
                                 if (debugThis) {
+                                    System.out.println("$$$ Component passed: " + examType.examName + " = " + marksObtained + "/" + examType.maxMarks + " (passing: " + examType.passingMarks + ")");
                                 }
                             }
                             
@@ -361,14 +373,19 @@ public class AnalyzerDAO {
                             componentsChecked++;
                             
                             if (debugThis) {
+                                System.out.println("    Contribution: " + contribution + " (weight: " + examType.weightage + ")");
                             }
                         } else {
                             if (debugThis) {
+                                System.out.println("$$$ NO MARKS: " + examType.examName);
                             }
                         }
                     }
                     
                     if (debugThis) {
+                        System.out.println("$$$ Total: " + weightedTotal + ", Components checked: " + componentsChecked);
+                        System.out.println("$$$ All components passed: " + allComponentsPassed);
+                        System.out.println("$$$ Will mark as: " + (!allComponentsPassed || weightedTotal < 50 ? "FAILED" : "PASSED"));
                     }
                     
                     // Only store if we checked at least one component
@@ -403,9 +420,13 @@ public class AnalyzerDAO {
                 
                 // DEBUG FOR PROBLEM STUDENTS 166, 170, 171
                 if (studentId == 166 || studentId == 170 || studentId == 171) {
-
+                    System.out.println("\n\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+                    System.out.println("!!! BATCH DEBUG - STUDENT " + studentId + " !!!");
+                    System.out.println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+                    System.out.println("Subject totals map entries:");
                     for (Map.Entry<Integer, Double> entry : subjectTotals.entrySet()) {
                         String status = entry.getValue() < 0 ? "FAILED" : "PASSED";
+                        System.out.println("  Subject ID " + entry.getKey() + " = " + entry.getValue() + " (" + status + ")");
                     }
                 }
                 
@@ -428,6 +449,9 @@ public class AnalyzerDAO {
                 
                 // DEBUG FOR PROBLEM STUDENTS 166, 170, 171
                 if (studentId == 166 || studentId == 170 || studentId == 171) {
+                    System.out.println("Total subjects: " + subjectCount);
+                    System.out.println("Failed subjects count: " + failedSubjectCount);
+                    System.out.println("Calculated percentage: " + percentage);
                 }
                 
                 // If ANY subject failed, student fails overall (mark with negative)
@@ -437,6 +461,10 @@ public class AnalyzerDAO {
                 
                 // DEBUG FOR PROBLEM STUDENTS 166, 170, 171
                 if (studentId == 166 || studentId == 170 || studentId == 171) {
+                    System.out.println("FINAL percentage after fail check: " + percentage);
+                    System.out.println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+                    System.out.println("!!! END BATCH DEBUG - STUDENT " + studentId + " !!!");
+                    System.out.println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
                 }
                 
                 studentPercentages.put(studentId, percentage);
@@ -585,6 +613,7 @@ public class AnalyzerDAO {
             // We must use the same logic as calculateWeightedSubjectTotalWithPass()
             // NOT the old SQL query that only checked single marks
             
+            System.out.println("\n=== FAILED SUBJECTS COUNT CALCULATION DEBUG ===");
             
             // Get all students for failed subjects count
             String studentsQueryForFailed = "SELECT id FROM students WHERE section_id = ? AND created_by = ?";
@@ -616,6 +645,8 @@ public class AnalyzerDAO {
             rs.close();
             ps.close();
             
+            System.out.println("Total students: " + studentIdsForFailed.size());
+            System.out.println("Total subjects: " + subjectsForFailed.size());
             
             // Count failed subjects per student using DUAL PASSING logic
             Map<Integer, Integer> studentFailCounts = new HashMap<>();
@@ -653,9 +684,12 @@ public class AnalyzerDAO {
                 int count = failedSubjectsDistribution.getOrDefault(i, 0);
                 if (count > 0) {
                     data.failedStudentsMap.put(i, count);
+                    System.out.println("Failed " + i + " subject(s): " + count + " students");
                 }
             }
             
+            System.out.println("Total students with failures: " + studentFailCounts.size());
+            System.out.println("=== END FAILED SUBJECTS COUNT DEBUG ===\n");
             
             // Get total students count
             String totalStudentsQuery = "SELECT COUNT(*) as total FROM students WHERE section_id = ? AND created_by = ?";
@@ -670,7 +704,14 @@ public class AnalyzerDAO {
             // Calculate pass/fail students using EFFICIENT BATCH METHOD with DUAL PASSING
             Map<Integer, Double> allPercentages = calculateAllStudentPercentagesBatch(sectionId, userId, selectedFilters);
             
-
+            System.out.println("\n\n");
+            System.out.println("*********************************************************");
+            System.out.println("********** METRIC CARD DEBUG - START **********");
+            System.out.println("*********************************************************");
+            System.out.println("Section ID: " + sectionId + ", User ID: " + userId);
+            System.out.println("Selected Filters: " + (selectedFilters != null ? selectedFilters.keySet() : "null"));
+            System.out.println("Total students in batch: " + allPercentages.size());
+            System.out.println("Data.totalStudents from query: " + data.totalStudents);
             
             int passCount = 0;
             int failCount = 0;
@@ -687,6 +728,12 @@ public class AnalyzerDAO {
                 }
             }
             
+            System.out.println("\nPass count: " + passCount);
+            System.out.println("Fail count: " + failCount);
+            System.out.println("\n>>> FAILED STUDENT IDs: " + failedStudentIds + " <<<");
+            System.out.println("\n*********************************************************");
+            System.out.println("********** METRIC CARD DEBUG - END **********");
+            System.out.println("*********************************************************\n\n");
             
             data.passStudents = passCount;
             data.failStudents = failCount;
@@ -737,7 +784,12 @@ public class AnalyzerDAO {
         Set<String> examTypes = (selectedFilters != null && selectedFilters.containsKey(subjectName)) 
                                 ? selectedFilters.get(subjectName) : null;
         
-
+        System.out.println("\n\n");
+        System.out.println("#########################################################");
+        System.out.println("########## SUBJECT ANALYSIS DEBUG: " + subjectName + " ##########");
+        System.out.println("#########################################################");
+        System.out.println("Total students to analyze: " + studentIds.size());
+        System.out.println("Exam types filter: " + (examTypes != null ? examTypes : "ALL"));
         
         // Initialize counters
         sa.passCount = 0;
@@ -774,6 +826,12 @@ public class AnalyzerDAO {
             }
         }
         
+        System.out.println("\nPass count: " + sa.passCount);
+        System.out.println("Fail count: " + sa.failCount);
+        System.out.println("\n>>> FAILED STUDENT IDs: " + failedStudentIds + " <<<");
+        System.out.println("\n#########################################################");
+        System.out.println("########## SUBJECT ANALYSIS DEBUG: " + subjectName + " END ##########");
+        System.out.println("#########################################################\n\n");
         
         // Set average marks (using weighted percentage)
         sa.averageMarks = countedStudents > 0 ? (totalPercentage / countedStudents) : 0.0;
@@ -1129,7 +1187,7 @@ public class AnalyzerDAO {
     
     /**
      * Calculate weighted subject total using SCALED FORMULA with DUAL PASSING REQUIREMENT:
-     * Total = ??((marks_obtained / max_marks) ?? weightage) for all components
+     * Total = Σ((marks_obtained / max_marks) × weightage) for all components
      * PASS REQUIREMENTS:
      * 1. Each component marks >= component passing_marks (e.g., Internal1 >= 8)
      * 2. Total weighted percentage >= 40
@@ -1170,6 +1228,7 @@ public class AnalyzerDAO {
             List<ExamTypeConfig> examTypes = getExamTypesForSubject(sectionId, subjectId);
             
             if (examTypes.isEmpty()) {
+                System.out.println("No exam types found for subject: " + subjectName);
                 return new SubjectPassResult(-1, false, false, false, failedComponents);
             }
             
@@ -1191,15 +1250,18 @@ public class AnalyzerDAO {
             psMarks.close();
             
             // COMMENT OUT for now - too much output
+            // System.out.println("\n=== DUAL PASSING CHECK for Student " + studentId + ", Subject: " + subjectName + " ===");
             
             for (ExamTypeConfig examType : examTypes) {
                 // Skip if filter is active and this exam not selected
                 if (selectedExamTypes != null && !selectedExamTypes.contains(examType.examName)) {
+                    // System.out.println(examType.examName + ": SKIPPED (not in filter)");
                     continue;
                 }
                 
                 Integer marksObtained = marksMap.get(examType.examName);
                 if (marksObtained == null) {
+                    // System.out.println(examType.examName + ": NO MARKS ENTERED - FAIL");
                     failedComponents.add(examType.examName);
                     allComponentsPassed = false;
                     continue;
@@ -1207,6 +1269,7 @@ public class AnalyzerDAO {
                 
                 // PROTECTION: Skip if max_marks is 0 or invalid (data error)
                 if (examType.maxMarks <= 0) {
+                    // System.out.println(examType.examName + ": SKIPPED (invalid max_marks=" + examType.maxMarks + ")");
                     continue;
                 }
                 
@@ -1217,12 +1280,13 @@ public class AnalyzerDAO {
                     allComponentsPassed = false;
                 }
                 
-                // SCALED FORMULA: (marks_obtained / max_marks) ?? weightage
+                // SCALED FORMULA: (marks_obtained / max_marks) × weightage
                 double contribution = (marksObtained.doubleValue() / examType.maxMarks) * examType.weightage;
                 weightedTotal += contribution;
                 componentsIncluded++;
                 
-                //                  " (pass>=" + examType.passingMarks + ") ?? " + examType.weightage + "% = " + 
+                // System.out.println(examType.examName + ": " + marksObtained + "/" + examType.maxMarks + 
+                //                  " (pass>=" + examType.passingMarks + ") × " + examType.weightage + "% = " + 
                 //                  String.format("%.2f", contribution) + " [" + (componentPassed ? "PASS" : "FAIL") + "]");
             }
             
@@ -1237,8 +1301,14 @@ public class AnalyzerDAO {
             // FINAL RESULT: Pass only if BOTH component AND total pass
             boolean overallPassed = allComponentsPassed && totalPassed;
             
+            // System.out.println("Weighted Total: " + String.format("%.2f", weightedTotal) + "/100");
+            // System.out.println("All Components Passed: " + allComponentsPassed);
+            // System.out.println("Total >= 40: " + totalPassed);
+            // System.out.println("OVERALL RESULT: " + (overallPassed ? "PASS" : "FAIL"));
             // if (!failedComponents.isEmpty()) {
+            //     System.out.println("Failed Components: " + String.join(", ", failedComponents));
             // }
+            // System.out.println("==============================\n");
             
             return new SubjectPassResult(weightedTotal, overallPassed, totalPassed, allComponentsPassed, failedComponents);
             
@@ -1264,7 +1334,7 @@ public class AnalyzerDAO {
      * @param studentId Student ID
      * @param sectionId Section ID
      * @param selectedFilters Map of subject -> Set of exam types to include
-     * @return Total weighted marks out of (number of subjects ?? 100)
+     * @return Total weighted marks out of (number of subjects × 100)
      */
     public double getStudentWeightedTotal(int studentId, int sectionId, Map<String, Set<String>> selectedFilters) {
         double totalWeighted = 0.0;
@@ -1546,6 +1616,8 @@ public class AnalyzerDAO {
     private String getFailedSubjectsForStudent(int sectionId, String rollNo, Map<String, Set<String>> selectedFilters) {
         List<String> failedSubjects = new ArrayList<>();
         
+        System.out.println("\n+++ getFailedSubjectsForStudent DEBUG +++");
+        System.out.println("+++ SectionID=" + sectionId + ", RollNo=" + rollNo + " +++");
         
         try {
             Connection conn = DatabaseConnection.getConnection();
@@ -1592,7 +1664,9 @@ public class AnalyzerDAO {
                 Set<String> examTypes = (selectedFilters != null) ? selectedFilters.get(subject) : null;
                 SubjectPassResult result = calculateWeightedSubjectTotalWithPass(studentId, sectionId, subject, examTypes);
                 
+                System.out.println("+++ Subject: " + subject + ", %=" + result.percentage + ", Passed=" + result.passed + ", TotalPass=" + result.totalPassed + ", ComponentsPass=" + result.allComponentsPassed);
                 if (!result.failedComponents.isEmpty()) {
+                    System.out.println("+++ Failed Components: " + String.join(", ", result.failedComponents));
                 }
                 
                 // Subject fails if: component failed OR total < 50
@@ -1601,18 +1675,25 @@ public class AnalyzerDAO {
                     // Include failure reason
                     if (!result.allComponentsPassed && !result.failedComponents.isEmpty()) {
                         failedSubjects.add(subject + " [" + String.join(", ", result.failedComponents) + "]");
+                        System.out.println("+++ ADDING TO FAILED: " + subject + " [Component failure]");
                     } else if (!result.totalPassed) {
                         failedSubjects.add(subject + " [Total < 50]");
+                        System.out.println("+++ ADDING TO FAILED: " + subject + " [Total < 50]");
                     } else {
                         failedSubjects.add(subject);
+                        System.out.println("+++ ADDING TO FAILED: " + subject + " [Other]");
                     }
                 } else if (result.percentage < 0) {
                     // Invalid calculation - likely no marks
                     failedSubjects.add(subject + " [No marks]");
+                    System.out.println("+++ ADDING TO FAILED: " + subject + " [No marks]");
                 } else {
+                    System.out.println("+++ SUBJECT PASSED: " + subject);
                 }
             }
             
+            System.out.println("+++ FINAL RESULT: " + (failedSubjects.isEmpty() ? "None" : String.join(", ", failedSubjects)));
+            System.out.println("+++ END getFailedSubjectsForStudent DEBUG +++\n");
             
             conn.close();
         } catch (SQLException e) {
@@ -1868,7 +1949,6 @@ public class AnalyzerDAO {
         public int maxMarks;
         public List<String> examTypes = new ArrayList<>();
         public Map<String, Integer> examTypeMaxMarks = new HashMap<>();
-        public Map<String, Integer> examTypeWeightage = new HashMap<>();
     }
     
     public static class StudentRankingDetail {
@@ -1923,22 +2003,18 @@ public class AnalyzerDAO {
                 String subjectName = entry.getKey();
                 int subjectId = entry.getValue();
                 
-                System.out.println("@@@ PROCESSING SUBJECT: " + subjectName + " (ID: " + subjectId + ") @@@");
-                
                 SubjectInfoDetailed subInfo = subjectMap.get(subjectName);
                 Set<String> examTypes = new LinkedHashSet<>();
                 Map<String, Integer> examTypeMaxMarks = new LinkedHashMap<>();
-                Map<String, Integer> examTypeWeightage = new LinkedHashMap<>();
                 
                 // First, try to get from marking_components (new system with schemes)
                 String componentQuery = 
-                    "SELECT mc.component_name, mc.actual_max_marks, mc.scaled_to_marks " +
+                    "SELECT mc.component_name, mc.scaled_to_marks " +
                     "FROM marking_components mc " +
                     "JOIN marking_schemes ms ON mc.scheme_id = ms.id " +
                     "WHERE ms.section_id = ? AND ms.subject_id = ? AND ms.is_active = 1 " +
                     "ORDER BY mc.sequence_order, mc.component_name";
                 
-                System.out.println("@@@ QUERYING marking_components for sectionId=" + sectionId + ", subjectId=" + subjectId + " @@@");
                 PreparedStatement ps2 = conn.prepareStatement(componentQuery);
                 ps2.setInt(1, sectionId);
                 ps2.setInt(2, subjectId);
@@ -1947,29 +2023,20 @@ public class AnalyzerDAO {
                 boolean hasComponents = false;
                 while (rs2.next()) {
                     String componentName = rs2.getString("component_name");
-                    int actualMaxMarks = rs2.getInt("actual_max_marks");  // For display in brackets
-                    int scaledMarks = rs2.getInt("scaled_to_marks");     // For weighted calculation
+                    int maxMarks = rs2.getInt("scaled_to_marks");
                     if (componentName != null && !componentName.trim().isEmpty()) {
                         examTypes.add(componentName);
-                        examTypeMaxMarks.put(componentName, actualMaxMarks);  // Display actual max marks
-                        // Weightage is the scaled marks (weighted component out of 100 total)
-                        examTypeWeightage.put(componentName, scaledMarks);
+                        examTypeMaxMarks.put(componentName, maxMarks);
                         hasComponents = true;
-                        System.out.println("@@@ EXAM TYPE DEBUG: " + componentName + 
-                            " | actual_max_marks=" + actualMaxMarks + 
-                            " | scaled_to_marks=" + scaledMarks + " @@@");
                     }
                 }
                 rs2.close();
                 ps2.close();
                 
-                System.out.println("@@@ QUERY COMPLETE: hasComponents=" + hasComponents + ", found " + examTypeMaxMarks.size() + " components @@@");
-                
                 // If no components found in new system, get from old system (student_marks)
                 if (!hasComponents) {
-                    System.out.println("@@@ NO COMPONENTS FOUND - Falling back to old system @@@");
                     String examTypeQuery1 = 
-                        "SELECT DISTINCT et.exam_name, et.max_marks " +
+                        "SELECT DISTINCT et.exam_name " +
                         "FROM student_marks sm " +
                         "JOIN exam_types et ON sm.exam_type_id = et.id " +
                         "JOIN students s ON sm.student_id = s.id " +
@@ -1983,11 +2050,8 @@ public class AnalyzerDAO {
                     
                     while (rs3.next()) {
                         String examType = rs3.getString("exam_name");
-                        int maxMarks = rs3.getInt("max_marks");
                         if (examType != null && !examType.trim().isEmpty()) {
                             examTypes.add(examType);
-                            examTypeMaxMarks.put(examType, maxMarks);
-                            System.out.println("@@@ OLD SYSTEM: " + examType + " | max_marks=" + maxMarks + " @@@");
                         }
                     }
                     rs3.close();
@@ -1995,7 +2059,7 @@ public class AnalyzerDAO {
                     
                     // Also check marks table with exam_types
                     String examTypeQuery2 = 
-                        "SELECT DISTINCT et.exam_name, et.max_marks " +
+                        "SELECT DISTINCT et.exam_name " +
                         "FROM marks m " +
                         "JOIN exam_types et ON m.exam_type_id = et.id " +
                         "JOIN students s ON m.student_id = s.id " +
@@ -2009,13 +2073,8 @@ public class AnalyzerDAO {
                     
                     while (rs4.next()) {
                         String examName = rs4.getString("exam_name");
-                        int maxMarks = rs4.getInt("max_marks");
                         if (examName != null && !examName.trim().isEmpty()) {
                             examTypes.add(examName);
-                            if (!examTypeMaxMarks.containsKey(examName)) {
-                                examTypeMaxMarks.put(examName, maxMarks);
-                                System.out.println("@@@ OLD SYSTEM (marks table): " + examName + " | max_marks=" + maxMarks + " @@@");
-                            }
                         }
                     }
                     rs4.close();
@@ -2028,7 +2087,6 @@ public class AnalyzerDAO {
                 // If we have actual max marks from components, use them
                 if (!examTypeMaxMarks.isEmpty()) {
                     subInfo.examTypeMaxMarks.putAll(examTypeMaxMarks);
-                    subInfo.examTypeWeightage.putAll(examTypeWeightage);
                 } else {
                     // For old system without component max marks, don't show individual marks
                     // Just leave examTypeMaxMarks empty - we'll handle display differently

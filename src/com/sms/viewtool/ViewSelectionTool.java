@@ -243,7 +243,14 @@ public class ViewSelectionTool extends JPanel {
         
         // Load sections from database
         loadSectionInfo();
+        
+        // Debug: Check section dropdown data
+        System.out.println("\n=== DROPDOWN SECTION DEBUG ===");
+        System.out.println("Available sections in sectionStudents map: " + sectionStudents.keySet());
+        
+        // Add section names from sectionStudents map (these are the ones that have data)
         sections.addAll(sectionStudents.keySet());
+        System.out.println("Dropdown will show: " + sections);
         
         sectionDropdown = new JComboBox<>(sections);
         sectionDropdown.setFont(new java.awt.Font("Arial", java.awt.Font.PLAIN, 13)); // Reduced
@@ -563,7 +570,9 @@ public class ViewSelectionTool extends JPanel {
 
     private void displaySelectedData() {
         String selectedSection = (String) sectionDropdown.getSelectedItem();
-        System.out.println("DEBUG: Selected section: " + selectedSection);
+        System.out.println("\n=== USER SELECTED SECTION ===");
+        System.out.println("Selected: '" + selectedSection + "'");
+        System.out.println("Available keys: " + sectionStudents.keySet());
         
         if (selectedSection == null) {
             showStyledMessage("Please select a section!", "No Section Selected", JOptionPane.WARNING_MESSAGE);

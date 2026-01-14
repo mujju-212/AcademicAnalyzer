@@ -10,6 +10,13 @@ import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.util.HashMap;
 import java.util.List;
+import java.util.ArrayList;
+import java.util.Set;
+import java.util.LinkedHashSet;
+import java.util.Map;
+import javax.swing.table.JTableHeader;
+import javax.swing.table.DefaultTableModel;
+import javax.swing.table.DefaultTableCellRenderer;
 import com.sms.analyzer.Student;
 import com.sms.dashboard.data.DashboardDataManager;
 import com.sms.dashboard.components.SidebarPanel;
@@ -190,6 +197,10 @@ public class DashboardScreen extends JFrame implements DashboardActions {
     
     // Method to show create section panel
     public void showCreateSectionPanel() {
+        // Remove old panel and create new one in create mode (null sectionId)
+        mainContentPanel.remove(createSectionPanel);
+        createSectionPanel = new CreateSectionPanel(this, userId, null, this::closeSectionCreationPanel);
+        mainContentPanel.add(createSectionPanel, CREATE_SECTION_VIEW);
         cardLayout.show(mainContentPanel, CREATE_SECTION_VIEW);
     }
     
@@ -543,6 +554,417 @@ public class DashboardScreen extends JFrame implements DashboardActions {
     public void closeStudentAnalyzerPanel() {
         cardLayout.show(mainContentPanel, DASHBOARD_VIEW);
         refreshDashboard();
+    }
+    
+    // New method to show section ranking table from library
+    public void showSectionRankingTable(int sectionId, String sectionName) {
+        System.out.println("@@@ DASHBOARD: Showing ranking table for section " + sectionName + " (ID: " + sectionId + ") @@@");
+        
+        // Create a new panel for the ranking table view
+        String SECTION_RANKING_VIEW = "sectionRanking_" + sectionId;
+        
+        // Remove any existing section ranking view
+        for (Component comp : mainContentPanel.getComponents()) {
+            if (comp.getName() != null && comp.getName().startsWith("sectionRanking_")) {
+                mainContentPanel.remove(comp);
+            }
+        }
+        
+        // Create the ranking table panel
+        JPanel rankingPanel = createSectionRankingPanel(sectionId, sectionName);
+        rankingPanel.setName(SECTION_RANKING_VIEW);
+        mainContentPanel.add(rankingPanel, SECTION_RANKING_VIEW);
+        
+        // Show the ranking table
+        cardLayout.show(mainContentPanel, SECTION_RANKING_VIEW);
+    }
+    
+    private JPanel createSectionRankingPanel(int sectionId, String sectionName) {
+        JPanel panel = new JPanel(new BorderLayout());
+        panel.setBackground(BACKGROUND_COLOR);
+        panel.setBorder(BorderFactory.createEmptyBorder(15, 15, 15, 15));
+        
+        // Header with back button and title
+        JPanel headerPanel = new JPanel(new BorderLayout());
+        headerPanel.setBackground(Color.WHITE);
+        headerPanel.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(229, 231, 235), 1),
+            BorderFactory.createEmptyBorder(15, 15, 15, 15)
+        ));
+        
+        // Back button
+        JButton backButton = new JButton("← Back to Library");
+        backButton.setFont(new Font("SansSerif", Font.BOLD, 14));
+        backButton.setForeground(PRIMARY_COLOR);
+        backButton.setBackground(Color.WHITE);
+        backButton.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(PRIMARY_COLOR, 2),
+            BorderFactory.createEmptyBorder(8, 15, 8, 15)
+        ));
+        backButton.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        backButton.addActionListener(e -> showLibrary());
+        
+        // Title
+        JLabel titleLabel = new JLabel("Section Ranking: " + sectionName);
+        titleLabel.setFont(new Font("SansSerif", Font.BOLD, 24));
+        titleLabel.setForeground(TEXT_PRIMARY);
+        
+        headerPanel.add(backButton, BorderLayout.WEST);
+        headerPanel.add(titleLabel, BorderLayout.CENTER);
+        
+        panel.add(headerPanel, BorderLayout.NORTH);
+        
+        // Get ranking table from AnalyzerDAO
+        AnalyzerDAO analyzerDAO = new AnalyzerDAO();
+        JPanel rankingTable = createRankingTableFromDAO(analyzerDAO, sectionId);
+        
+        // Add to scrollpane
+        JScrollPane scrollPane = new JScrollPane(rankingTable);
+        scrollPane.setBorder(null);
+        scrollPane.getViewport().setBackground(BACKGROUND_COLOR);
+        
+        panel.add(scrollPane, BorderLayout.CENTER);
+        
+        return panel;
+    }
+    
+    private JPanel createRankingTableFromDAO(AnalyzerDAO analyzerDAO, int sectionId) {
+        AnalyzerDAO.DetailedRankingData rankingData = analyzerDAO.getDetailedStudentRanking(sectionId, new HashMap<>());
+        
+        if (rankingData == null || rankingData.students == null || rankingData.students.isEmpty()) {
+            JPanel emptyPanel = new JPanel();
+            emptyPanel.setBackground(Color.WHITE);
+            JLabel noData = new JLabel("No ranking data available");
+            noData.setFont(new Font("SansSerif", Font.ITALIC, 14));
+            noData.setForeground(new Color(107, 114, 128));
+            emptyPanel.add(noData);
+            return emptyPanel;
+        }
+        
+        // Create hierarchical header structure (2-row header)
+        JPanel headerPanel = new JPanel();
+        headerPanel.setLayout(new BoxLayout(headerPanel, BoxLayout.Y_AXIS));
+        headerPanel.setBackground(Color.WHITE);
+        headerPanel.setBorder(BorderFactory.createMatteBorder(0, 0, 2, 0, PRIMARY_COLOR));
+        
+        // ROW 1: Subject Names with Total Marks in brackets
+        JPanel subjectNameRow = new JPanel();
+        subjectNameRow.setLayout(new BoxLayout(subjectNameRow, BoxLayout.X_AXIS));
+        subjectNameRow.setBackground(PRIMARY_COLOR);
+        subjectNameRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 35));
+        
+        // Fixed columns - Student Info
+        int studentInfoWidth = 330; // 50 + 100 + 180
+        addHeaderCell(subjectNameRow, "Student Info", studentInfoWidth, PRIMARY_COLOR, Color.WHITE, Font.BOLD, 12);
+        
+        // Build column list and widths for data table
+        List<String> columnList = new ArrayList<>();
+        List<Integer> columnWidths = new ArrayList<>();
+        columnList.add("Rank");
+        columnList.add("Roll No.");
+        columnList.add("Student Name");
+        columnWidths.add(50);
+        columnWidths.add(100);
+        columnWidths.add(180);
+        
+        // ROW 2: Exam Types and Column Names
+        JPanel examTypeRow = new JPanel();
+        examTypeRow.setLayout(new BoxLayout(examTypeRow, BoxLayout.X_AXIS));
+        examTypeRow.setBackground(PRIMARY_COLOR);
+        examTypeRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 35));
+        
+        // Fixed columns
+        addHeaderCell(examTypeRow, "Rank", 50, PRIMARY_COLOR, Color.WHITE, Font.BOLD, 10);
+        addHeaderCell(examTypeRow, "Roll No.", 100, PRIMARY_COLOR, Color.WHITE, Font.BOLD, 10);
+        addHeaderCell(examTypeRow, "Student Name", 180, PRIMARY_COLOR, Color.WHITE, Font.BOLD, 10);
+        
+        // Subject name cells with max marks in brackets - CALCULATE WIDTH FROM CHILD COLUMNS
+        for (AnalyzerDAO.SubjectInfoDetailed subject : rankingData.subjects) {
+            // First, calculate the total width needed for all exam type columns under this subject
+            int totalSubjectWidth = 0;
+            List<Integer> examTypeWidths = new ArrayList<>();
+            
+            // Calculate width for each exam type column
+            for (String examType : subject.examTypes) {
+                Integer examMaxMarks = subject.examTypeMaxMarks.get(examType);
+                String examHeader = examMaxMarks != null && examMaxMarks > 0 ? 
+                                   examType + " (" + examMaxMarks + ")" : examType;
+                int width = Math.max(calculateTextWidth(examHeader, 10) + 20, 85);
+                examTypeWidths.add(width);
+                totalSubjectWidth += width;
+            }
+            
+            // Add width for Total column
+            int totalColWidth = Math.max(calculateTextWidth("Total", 10) + 20, 85);
+            examTypeWidths.add(totalColWidth);
+            totalSubjectWidth += totalColWidth;
+            
+            // Now add subject header cell with the calculated total width
+            String subjectHeader = subject.subjectName + " (" + subject.maxMarks + ")";
+            addHeaderCell(subjectNameRow, subjectHeader, totalSubjectWidth, PRIMARY_COLOR, Color.WHITE, Font.BOLD, 12);
+            
+            // Add exam type columns to row 2
+            int examIdx = 0;
+            for (String examType : subject.examTypes) {
+                Integer examMaxMarks = subject.examTypeMaxMarks.get(examType);
+                String examHeader = examMaxMarks != null && examMaxMarks > 0 ? 
+                                   examType + " (" + examMaxMarks + ")" : examType;
+                int width = examTypeWidths.get(examIdx++);
+                addHeaderCell(examTypeRow, examHeader, width, PRIMARY_COLOR, Color.WHITE, Font.PLAIN, 10);
+                columnList.add(examHeader);
+                columnWidths.add(width);
+            }
+            
+            // Add Total column
+            int width = examTypeWidths.get(examIdx);
+            addHeaderCell(examTypeRow, "Total", width, PRIMARY_COLOR, Color.WHITE, Font.BOLD, 10);
+            columnList.add("Total");
+            columnWidths.add(width);
+        }
+        
+        // Overall metrics
+        addHeaderCell(examTypeRow, "Overall Total", 85, PRIMARY_COLOR, Color.WHITE, Font.BOLD, 10);
+        addHeaderCell(examTypeRow, "Percentage", 85, PRIMARY_COLOR, Color.WHITE, Font.BOLD, 10);
+        addHeaderCell(examTypeRow, "Grade", 85, PRIMARY_COLOR, Color.WHITE, Font.BOLD, 10);
+        addHeaderCell(examTypeRow, "CGPA", 85, PRIMARY_COLOR, Color.WHITE, Font.BOLD, 10);
+        columnList.add("Overall Total");
+        columnList.add("Percentage");
+        columnList.add("Grade");
+        columnList.add("CGPA");
+        columnWidths.add(85);
+        columnWidths.add(85);
+        columnWidths.add(85);
+        columnWidths.add(85);
+        
+        headerPanel.add(subjectNameRow);
+        headerPanel.add(examTypeRow);
+        
+        // Create data table
+        String[] columns = columnList.toArray(new String[0]);
+        DefaultTableModel model = new DefaultTableModel(columns, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false;
+            }
+        };
+        
+        JTable table = new JTable(model);
+        table.setRowHeight(35);
+        table.setShowGrid(true);
+        table.setGridColor(new Color(229, 231, 235));
+        table.setIntercellSpacing(new Dimension(1, 1));
+        table.setTableHeader(null); // Remove default header since we have custom one
+        table.setFont(new Font("SansSerif", Font.PLAIN, 11));
+        table.setSelectionBackground(new Color(99, 102, 241, 30));
+        table.setSelectionForeground(new Color(17, 24, 39));
+        table.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
+        
+        // Set column widths based on calculated values
+        for (int i = 0; i < columnWidths.size(); i++) {
+            table.getColumnModel().getColumn(i).setPreferredWidth(columnWidths.get(i));
+        }
+        
+        // Custom renderer
+        DefaultTableCellRenderer cellRenderer = new DefaultTableCellRenderer() {
+            @Override
+            public Component getTableCellRendererComponent(JTable table, Object value,
+                    boolean isSelected, boolean hasFocus, int row, int column) {
+                Component c = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
+                
+                if (!isSelected) {
+                    if (row % 2 == 0) {
+                        c.setBackground(Color.WHITE);
+                    } else {
+                        c.setBackground(new Color(249, 250, 251));
+                    }
+                }
+                
+                // Center alignment for all columns except student name
+                if (column == 2) {
+                    ((JLabel) c).setHorizontalAlignment(SwingConstants.LEFT);
+                } else {
+                    ((JLabel) c).setHorizontalAlignment(SwingConstants.CENTER);
+                }
+                
+                // Special formatting for rank column
+                if (column == 0 && value != null) {
+                    try {
+                        int rank = Integer.parseInt(value.toString());
+                        if (rank == 1) {
+                            c.setForeground(new Color(255, 215, 0)); // Gold
+                            setFont(getFont().deriveFont(Font.BOLD));
+                        } else if (rank == 2) {
+                            c.setForeground(new Color(192, 192, 192)); // Silver
+                            setFont(getFont().deriveFont(Font.BOLD));
+                        } else if (rank == 3) {
+                            c.setForeground(new Color(205, 127, 50)); // Bronze
+                            setFont(getFont().deriveFont(Font.BOLD));
+                        } else {
+                            c.setForeground(new Color(17, 24, 39));
+                            setFont(getFont().deriveFont(Font.PLAIN));
+                        }
+                    } catch (NumberFormatException e) {
+                        c.setForeground(new Color(17, 24, 39));
+                    }
+                } else {
+                    c.setForeground(new Color(17, 24, 39));
+                }
+                
+                return c;
+            }
+        };
+        
+        for (int i = 0; i < table.getColumnCount(); i++) {
+            table.getColumnModel().getColumn(i).setCellRenderer(cellRenderer);
+        }
+        
+        // Populate table with data - USE WEIGHTED CALCULATION FOR TOTALS
+        AnalyzerDAO dao = new AnalyzerDAO();
+        
+        for (AnalyzerDAO.StudentRankingDetail student : rankingData.students) {
+            Object[] rowData = new Object[columnList.size()];
+            int col = 0;
+            
+            rowData[col++] = student.rank;
+            rowData[col++] = student.rollNumber;
+            rowData[col++] = student.studentName;
+            
+            // Get student ID for weighted calculation
+            int studentId = getStudentIdByRollNumber(student.rollNumber, sectionId);
+            
+            // Add marks for each subject's exam types and total
+            for (AnalyzerDAO.SubjectInfoDetailed subject : rankingData.subjects) {
+                Map<String, Double> studentSubjectMarks = student.subjectMarks.get(subject.subjectName);
+                
+                if (studentSubjectMarks != null) {
+                    // Add exam type marks
+                    for (String examType : subject.examTypes) {
+                        Double marks = studentSubjectMarks.get(examType);
+                        rowData[col++] = marks != null ? String.format("%.1f", marks) : "-";
+                    }
+                    
+                    // Calculate WEIGHTED subject total using same method as SectionAnalyzer
+                    // Use subject name and exam types filter (null = use all exam types)
+                    AnalyzerDAO.SubjectPassResult result = dao.calculateWeightedSubjectTotalWithPass(
+                        studentId, 
+                        sectionId, 
+                        subject.subjectName,
+                        null  // null = use all exam types
+                    );
+                    rowData[col++] = result.percentage >= 0 ? String.format("%.2f", result.percentage) : "-";
+                } else {
+                    // No marks for this subject - fill with dashes
+                    for (int j = 0; j < subject.examTypes.size() + 1; j++) {
+                        rowData[col++] = "-";
+                    }
+                }
+            }
+            
+            rowData[col++] = String.format("%.2f", student.totalMarks);
+            rowData[col++] = String.format("%.2f%%", student.percentage);
+            rowData[col++] = student.grade != null ? student.grade : "-";
+            rowData[col++] = String.format("%.2f", student.cgpa);
+            
+            model.addRow(rowData);
+        }
+        
+        // Wrap table and header in container
+        JPanel tableWithHeaderPanel = new JPanel(new BorderLayout());
+        tableWithHeaderPanel.setBackground(Color.WHITE);
+        tableWithHeaderPanel.add(headerPanel, BorderLayout.NORTH);
+        tableWithHeaderPanel.add(table, BorderLayout.CENTER);
+        
+        // Create scroll pane with optimized scrolling performance
+        JScrollPane scrollPane = new JScrollPane(tableWithHeaderPanel);
+        scrollPane.setBorder(BorderFactory.createLineBorder(new Color(229, 231, 235), 1));
+        scrollPane.getViewport().setBackground(Color.WHITE);
+        scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
+        scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+        
+        // Optimize scroll performance
+        scrollPane.getVerticalScrollBar().setUnitIncrement(16);
+        scrollPane.getHorizontalScrollBar().setUnitIncrement(16);
+        table.setDoubleBuffered(true);
+        scrollPane.getViewport().setScrollMode(JViewport.SIMPLE_SCROLL_MODE);
+        
+        JPanel tablePanel = new JPanel(new BorderLayout());
+        tablePanel.setBackground(Color.WHITE);
+        tablePanel.add(scrollPane, BorderLayout.CENTER);
+        
+        return tablePanel;
+    }
+    
+    // Helper method to add header cell with specified properties
+    private void addHeaderCell(JPanel row, String text, int width, Color bg, Color fg, int fontStyle, int fontSize) {
+        JLabel cell = new JLabel(text, SwingConstants.CENTER);
+        cell.setFont(new Font("SansSerif", fontStyle, fontSize));
+        cell.setForeground(fg);
+        cell.setBackground(bg);
+        cell.setOpaque(true);
+        cell.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 1, 1, 1, new Color(255, 255, 255, 50)),
+            BorderFactory.createEmptyBorder(5, 5, 5, 5)
+        ));
+        cell.setPreferredSize(new Dimension(width, 30));
+        cell.setMinimumSize(new Dimension(width, 30));
+        cell.setMaximumSize(new Dimension(width, 30));
+        row.add(cell);
+    }
+    
+    // Helper method to calculate text width for dynamic column sizing
+    private int calculateTextWidth(String text, int fontSize) {
+        JLabel dummyLabel = new JLabel(text);
+        dummyLabel.setFont(new Font("SansSerif", Font.PLAIN, fontSize));
+        FontMetrics metrics = dummyLabel.getFontMetrics(dummyLabel.getFont());
+        return metrics.stringWidth(text);
+    }
+    
+    // Helper method to get student ID by roll number
+    private int getStudentIdByRollNumber(String rollNumber, int sectionId) {
+        try {
+            Connection conn = DatabaseConnection.getConnection();
+            String query = "SELECT id FROM students WHERE roll_number = ? AND section_id = ?";
+            PreparedStatement ps = conn.prepareStatement(query);
+            ps.setString(1, rollNumber);
+            ps.setInt(2, sectionId);
+            ResultSet rs = ps.executeQuery();
+            
+            int studentId = 0;
+            if (rs.next()) {
+                studentId = rs.getInt("id");
+            }
+            rs.close();
+            ps.close();
+            return studentId;
+        } catch (SQLException e) {
+            e.printStackTrace();
+            return 0;
+        }
+    }
+    
+    // Helper method to get subject ID by name
+    private int getSubjectIdByName(String subjectName, int sectionId) {
+        try {
+            Connection conn = DatabaseConnection.getConnection();
+            String query = "SELECT subject_id FROM section_subjects ss " +
+                          "JOIN subjects sub ON ss.subject_id = sub.id " +
+                          "WHERE ss.section_id = ? AND sub.subject_name = ?";
+            PreparedStatement ps = conn.prepareStatement(query);
+            ps.setInt(1, sectionId);
+            ps.setString(2, subjectName);
+            ResultSet rs = ps.executeQuery();
+            
+            int subjectId = 0;
+            if (rs.next()) {
+                subjectId = rs.getInt("subject_id");
+            }
+            rs.close();
+            ps.close();
+            return subjectId;
+        } catch (SQLException e) {
+            e.printStackTrace();
+            return 0;
+        }
     }
     
     @Override

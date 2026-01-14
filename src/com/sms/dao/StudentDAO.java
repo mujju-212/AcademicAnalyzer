@@ -132,6 +132,84 @@ return false;
         }
     }
     
+    // Update student roll number (with duplicate check)
+    public boolean updateStudentRollNumber(int studentId, String newRollNumber, int updatedBy) {
+        try (Connection conn = DatabaseConnection.getConnection()) {
+            // First check if new roll number already exists in the same section
+            String checkQuery = "SELECT COUNT(*) FROM students s1, students s2 " +
+                               "WHERE s1.id = ? AND s2.roll_number = ? " +
+                               "AND s1.section_id = s2.section_id AND s2.id != s1.id";
+            
+            PreparedStatement checkPs = conn.prepareStatement(checkQuery);
+            checkPs.setInt(1, studentId);
+            checkPs.setString(2, newRollNumber);
+            ResultSet rs = checkPs.executeQuery();
+            
+            if (rs.next() && rs.getInt(1) > 0) {
+                System.out.println("Roll number " + newRollNumber + " already exists in this section");
+                return false;
+            }
+            
+            // Update roll number
+            String updateQuery = "UPDATE students SET roll_number = ?, updated_at = NOW() WHERE id = ? AND created_by = ?";
+            PreparedStatement updatePs = conn.prepareStatement(updateQuery);
+            updatePs.setString(1, newRollNumber);
+            updatePs.setInt(2, studentId);
+            updatePs.setInt(3, updatedBy);
+            
+            return updatePs.executeUpdate() > 0;
+            
+        } catch (SQLException e) {
+            System.out.println("Error updating roll number: " + e.getMessage());
+            e.printStackTrace();
+            return false;
+        }
+    }
+    
+    // Update student with all fields including roll number
+    public boolean updateStudentComplete(int studentId, String rollNumber, String name, 
+                                       String email, String phone, int updatedBy) {
+        try (Connection conn = DatabaseConnection.getConnection()) {
+            // Check if new roll number already exists (excluding current student)
+            String checkQuery = "SELECT COUNT(*) FROM students s1, students s2 " +
+                               "WHERE s1.id = ? AND s2.roll_number = ? " +
+                               "AND s1.section_id = s2.section_id AND s2.id != s1.id";
+            
+            PreparedStatement checkPs = conn.prepareStatement(checkQuery);
+            checkPs.setInt(1, studentId);
+            checkPs.setString(2, rollNumber);
+            ResultSet rs = checkPs.executeQuery();
+            
+            if (rs.next() && rs.getInt(1) > 0) {
+                System.out.println("Roll number " + rollNumber + " already exists in this section");
+                return false;
+            }
+            
+            // Update all fields
+            String updateQuery = "UPDATE students SET roll_number = ?, student_name = ?, email = ?, phone = ?, updated_at = NOW() " +
+                               "WHERE id = ? AND created_by = ?";
+            PreparedStatement updatePs = conn.prepareStatement(updateQuery);
+            updatePs.setString(1, rollNumber);
+            updatePs.setString(2, name);
+            updatePs.setString(3, email.isEmpty() ? null : email);
+            updatePs.setString(4, phone.isEmpty() ? null : phone);
+            updatePs.setInt(5, studentId);
+            updatePs.setInt(6, updatedBy);
+            
+            int result = updatePs.executeUpdate();
+            System.out.println("Updated student " + studentId + " with roll number " + rollNumber + ": " + (result > 0));
+            return result > 0;
+            
+        } catch (SQLException e) {
+            System.out.println("Error updating student: " + e.getMessage());
+            if (e.getErrorCode() == 1062) { // MySQL duplicate entry error
+                System.out.println("Duplicate roll number constraint violation");
+            }
+            e.printStackTrace();
+            return false;
+        }
+    }
+    
     // Delete student
     public boolean deleteStudent(int studentId, int deletedBy) {
         Connection conn = null;

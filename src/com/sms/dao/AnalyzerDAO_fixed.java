@@ -1868,7 +1868,6 @@ public class AnalyzerDAO {
         public int maxMarks;
         public List<String> examTypes = new ArrayList<>();
         public Map<String, Integer> examTypeMaxMarks = new HashMap<>();
-        public Map<String, Integer> examTypeWeightage = new HashMap<>();
     }
     
     public static class StudentRankingDetail {
@@ -1923,22 +1922,18 @@ public class AnalyzerDAO {
                 String subjectName = entry.getKey();
                 int subjectId = entry.getValue();
                 
-                System.out.println("@@@ PROCESSING SUBJECT: " + subjectName + " (ID: " + subjectId + ") @@@");
-                
                 SubjectInfoDetailed subInfo = subjectMap.get(subjectName);
                 Set<String> examTypes = new LinkedHashSet<>();
                 Map<String, Integer> examTypeMaxMarks = new LinkedHashMap<>();
-                Map<String, Integer> examTypeWeightage = new LinkedHashMap<>();
                 
                 // First, try to get from marking_components (new system with schemes)
                 String componentQuery = 
-                    "SELECT mc.component_name, mc.actual_max_marks, mc.scaled_to_marks " +
+                    "SELECT mc.component_name, mc.scaled_to_marks " +
                     "FROM marking_components mc " +
                     "JOIN marking_schemes ms ON mc.scheme_id = ms.id " +
                     "WHERE ms.section_id = ? AND ms.subject_id = ? AND ms.is_active = 1 " +
                     "ORDER BY mc.sequence_order, mc.component_name";
                 
-                System.out.println("@@@ QUERYING marking_components for sectionId=" + sectionId + ", subjectId=" + subjectId + " @@@");
                 PreparedStatement ps2 = conn.prepareStatement(componentQuery);
                 ps2.setInt(1, sectionId);
                 ps2.setInt(2, subjectId);
@@ -1947,29 +1942,20 @@ public class AnalyzerDAO {
                 boolean hasComponents = false;
                 while (rs2.next()) {
                     String componentName = rs2.getString("component_name");
-                    int actualMaxMarks = rs2.getInt("actual_max_marks");  // For display in brackets
-                    int scaledMarks = rs2.getInt("scaled_to_marks");     // For weighted calculation
+                    int maxMarks = rs2.getInt("scaled_to_marks");
                     if (componentName != null && !componentName.trim().isEmpty()) {
                         examTypes.add(componentName);
-                        examTypeMaxMarks.put(componentName, actualMaxMarks);  // Display actual max marks
-                        // Weightage is the scaled marks (weighted component out of 100 total)
-                        examTypeWeightage.put(componentName, scaledMarks);
+                        examTypeMaxMarks.put(componentName, maxMarks);
                         hasComponents = true;
-                        System.out.println("@@@ EXAM TYPE DEBUG: " + componentName + 
-                            " | actual_max_marks=" + actualMaxMarks + 
-                            " | scaled_to_marks=" + scaledMarks + " @@@");
                     }
                 }
                 rs2.close();
                 ps2.close();
                 
-                System.out.println("@@@ QUERY COMPLETE: hasComponents=" + hasComponents + ", found " + examTypeMaxMarks.size() + " components @@@");
-                
                 // If no components found in new system, get from old system (student_marks)
                 if (!hasComponents) {
-                    System.out.println("@@@ NO COMPONENTS FOUND - Falling back to old system @@@");
                     String examTypeQuery1 = 
-                        "SELECT DISTINCT et.exam_name, et.max_marks " +
+                        "SELECT DISTINCT et.exam_name " +
                         "FROM student_marks sm " +
                         "JOIN exam_types et ON sm.exam_type_id = et.id " +
                         "JOIN students s ON sm.student_id = s.id " +
@@ -1983,11 +1969,8 @@ public class AnalyzerDAO {
                     
                     while (rs3.next()) {
                         String examType = rs3.getString("exam_name");
-                        int maxMarks = rs3.getInt("max_marks");
                         if (examType != null && !examType.trim().isEmpty()) {
                             examTypes.add(examType);
-                            examTypeMaxMarks.put(examType, maxMarks);
-                            System.out.println("@@@ OLD SYSTEM: " + examType + " | max_marks=" + maxMarks + " @@@");
                         }
                     }
                     rs3.close();
@@ -1995,7 +1978,7 @@ public class AnalyzerDAO {
                     
                     // Also check marks table with exam_types
                     String examTypeQuery2 = 
-                        "SELECT DISTINCT et.exam_name, et.max_marks " +
+                        "SELECT DISTINCT et.exam_name " +
                         "FROM marks m " +
                         "JOIN exam_types et ON m.exam_type_id = et.id " +
                         "JOIN students s ON m.student_id = s.id " +
@@ -2009,13 +1992,8 @@ public class AnalyzerDAO {
                     
                     while (rs4.next()) {
                         String examName = rs4.getString("exam_name");
-                        int maxMarks = rs4.getInt("max_marks");
                         if (examName != null && !examName.trim().isEmpty()) {
                             examTypes.add(examName);
-                            if (!examTypeMaxMarks.containsKey(examName)) {
-                                examTypeMaxMarks.put(examName, maxMarks);
-                                System.out.println("@@@ OLD SYSTEM (marks table): " + examName + " | max_marks=" + maxMarks + " @@@");
-                            }
                         }
                     }
                     rs4.close();
@@ -2028,7 +2006,6 @@ public class AnalyzerDAO {
                 // If we have actual max marks from components, use them
                 if (!examTypeMaxMarks.isEmpty()) {
                     subInfo.examTypeMaxMarks.putAll(examTypeMaxMarks);
-                    subInfo.examTypeWeightage.putAll(examTypeWeightage);
                 } else {
                     // For old system without component max marks, don't show individual marks
                     // Just leave examTypeMaxMarks empty - we'll handle display differently

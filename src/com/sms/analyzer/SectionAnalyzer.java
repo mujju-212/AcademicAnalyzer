@@ -43,6 +43,7 @@ public class SectionAnalyzer extends JPanel {
     private String currentSectionName;
     private JFrame parentFrame;
     private Runnable onCloseCallback;
+    private JComboBox<String> sectionDropdown;
     
     // Filter-related fields
     private Map<String, Set<String>> selectedFilters; // Track selected subject-component combinations
@@ -54,7 +55,7 @@ public class SectionAnalyzer extends JPanel {
         this(parent, sectionStudents, null);
         if (parent != null) {
             JDialog dialog = new JDialog(parent, "Section Performance Analyzer", true);
-            dialog.setSize(1300, 750);
+            dialog.setSize(1000, 750);
             dialog.setLocationRelativeTo(parent);
             dialog.setLayout(new BorderLayout());
             dialog.getContentPane().setBackground(BACKGROUND_COLOR);
@@ -86,8 +87,30 @@ public class SectionAnalyzer extends JPanel {
         
         this.availableSections = sections;
         if (!sections.isEmpty()) {
-            this.currentSectionId = sections.get(0).id;
-            this.currentSectionName = sections.get(0).sectionName;
+            // Check if a specific section was passed in the constructor
+            String selectedSectionName = null;
+            if (this.sectionStudents != null && !this.sectionStudents.isEmpty()) {
+                selectedSectionName = this.sectionStudents.keySet().iterator().next();
+            }
+            
+            // Find the matching section from database or default to first
+            boolean sectionFound = false;
+            if (selectedSectionName != null) {
+                for (SectionDAO.SectionInfo section : sections) {
+                    if (section.sectionName.equals(selectedSectionName)) {
+                        this.currentSectionId = section.id;
+                        this.currentSectionName = section.sectionName;
+                        sectionFound = true;
+                        break;
+                    }
+                }
+            }
+            
+            // If not found or no selection, use first section
+            if (!sectionFound) {
+                this.currentSectionId = sections.get(0).id;
+                this.currentSectionName = sections.get(0).sectionName;
+            }
             
             // Initialize filters for this section
             loadAvailableComponentsForSection(this.currentSectionId);
@@ -107,7 +130,7 @@ public class SectionAnalyzer extends JPanel {
         // Header Card
         JPanel headerCard = createModernCard();
         headerCard.setLayout(new BorderLayout(15, 10));
-        headerCard.setPreferredSize(new Dimension(0, 100));
+        headerCard.setPreferredSize(new Dimension(0, 150));
 
         // Title and tabs panel
         JPanel topPanel = new JPanel(new BorderLayout());
@@ -166,8 +189,62 @@ public class SectionAnalyzer extends JPanel {
         radioPanel.add(studentRadio);
         radioPanel.add(sectionRadio);
 
+        // Section dropdown selector
+        JPanel dropdownPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 15, 5));
+        dropdownPanel.setOpaque(false);
+        
+        JLabel sectionLabel = new JLabel("Select Section:");
+        sectionLabel.setFont(new Font("SansSerif", Font.BOLD, 14));
+        sectionLabel.setForeground(TEXT_PRIMARY);
+        dropdownPanel.add(sectionLabel);
+        
+        // Create dropdown with section names
+        String[] sectionNames = availableSections.stream()
+            .map(s -> s.sectionName)
+            .toArray(String[]::new);
+        sectionDropdown = new JComboBox<>(sectionNames);
+        sectionDropdown.setFont(new Font("SansSerif", Font.PLAIN, 14));
+        sectionDropdown.setPreferredSize(new Dimension(200, 35));
+        sectionDropdown.setBackground(Color.WHITE);
+        sectionDropdown.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(BORDER_COLOR),
+            BorderFactory.createEmptyBorder(5, 10, 5, 10)
+        ));
+        sectionDropdown.setFocusable(true);
+        sectionDropdown.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        
+        // Set currently selected section
+        if (currentSectionName != null) {
+            sectionDropdown.setSelectedItem(currentSectionName);
+        }
+        
+        // Add listener to handle section selection
+        sectionDropdown.addActionListener(e -> {
+            String selectedSection = (String) sectionDropdown.getSelectedItem();
+            if (selectedSection != null && !selectedSection.equals(currentSectionName)) {
+                // Find the section info for the selected name
+                for (SectionDAO.SectionInfo section : availableSections) {
+                    if (section.sectionName.equals(selectedSection)) {
+                        currentSectionId = section.id;
+                        currentSectionName = section.sectionName;
+                        refreshSectionData();
+                        break;
+                    }
+                }
+            }
+        });
+        
+        dropdownPanel.add(sectionDropdown);
+
+        // Create center panel for radio and dropdown
+        JPanel centerPanel = new JPanel();
+        centerPanel.setLayout(new BoxLayout(centerPanel, BoxLayout.Y_AXIS));
+        centerPanel.setOpaque(false);
+        centerPanel.add(radioPanel);
+        centerPanel.add(dropdownPanel);
+
         headerCard.add(topPanel, BorderLayout.NORTH);
-        headerCard.add(radioPanel, BorderLayout.CENTER);
+        headerCard.add(centerPanel, BorderLayout.CENTER);
         
         mainPanel.add(headerCard, BorderLayout.NORTH);
 
@@ -242,12 +319,16 @@ public class SectionAnalyzer extends JPanel {
                 // Calculate width based on text length
                 FontMetrics fm = tabButton.getFontMetrics(tabButton.getFont());
                 int textWidth = fm.stringWidth(section.sectionName);
-                int tabWidth = Math.max(45, textWidth + 16); // Min 45px, +16 for padding
-                tabButton.setPreferredSize(new Dimension(tabWidth, 28));
+                int tabWidth = Math.min(Math.max(40, textWidth + 8), 70); // Min 40px, +8 padding, Max 70px
+                tabButton.setPreferredSize(new Dimension(tabWidth, 24));
+                
+                // Fix closure issue - create final copies for lambda
+                final int sectionId = section.id;
+                final String sectionName = section.sectionName;
                 
                 tabButton.addActionListener(e -> {
-                    currentSectionId = section.id;
-                    currentSectionName = section.sectionName;
+                    currentSectionId = sectionId;  // Use final copy
+                    currentSectionName = sectionName;  // Use final copy
                     updateTabAppearance(tabsPanel, tabButton);
                     refreshSectionData();
                 });
@@ -257,7 +338,17 @@ public class SectionAnalyzer extends JPanel {
             }
         }
         
-        contentWrapper.add(tabsPanel);
+        // Wrap tabs in horizontal scroll pane
+        JScrollPane tabsScrollPane = new JScrollPane(tabsPanel);
+        tabsScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+        tabsScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
+        tabsScrollPane.setBorder(BorderFactory.createEmptyBorder());
+        tabsScrollPane.setOpaque(false);
+        tabsScrollPane.getViewport().setOpaque(false);
+        tabsScrollPane.setMaximumSize(new Dimension(Integer.MAX_VALUE, 50));
+        tabsScrollPane.setAlignmentX(Component.LEFT_ALIGNMENT);
+        
+        contentWrapper.add(tabsScrollPane);
         contentWrapper.add(Box.createVerticalStrut(5));
 
         // PDF Export Button
@@ -280,7 +371,7 @@ public class SectionAnalyzer extends JPanel {
         JPanel subjectRow = new JPanel(new BorderLayout());
         subjectRow.setOpaque(false);
         subjectRow.setAlignmentX(Component.LEFT_ALIGNMENT);
-        subjectRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 240));
+        subjectRow.setMaximumSize(new Dimension(935, 240));
         
         JPanel subjectPanel = createSubjectTable(analysisData.subjectAnalysisList);
         subjectRow.add(subjectPanel, BorderLayout.CENTER);
@@ -292,7 +383,7 @@ public class SectionAnalyzer extends JPanel {
         JPanel row2 = new JPanel(new GridLayout(1, 2, 15, 0));
         row2.setOpaque(false);
         row2.setAlignmentX(Component.LEFT_ALIGNMENT);
-        row2.setMaximumSize(new Dimension(Integer.MAX_VALUE, 260));
+        row2.setMaximumSize(new Dimension(935, 260));
         
         JPanel chartCard = createModernCard();
         chartCard.setLayout(new BorderLayout());
@@ -312,7 +403,7 @@ public class SectionAnalyzer extends JPanel {
         JPanel row3 = new JPanel(new GridLayout(1, 2, 15, 0));
         row3.setOpaque(false);
         row3.setAlignmentX(Component.LEFT_ALIGNMENT);
-        row3.setMaximumSize(new Dimension(Integer.MAX_VALUE, 240));
+        row3.setMaximumSize(new Dimension(935, 240));
         
         JPanel topStudentsCard = createModernCard();
         topStudentsCard.setLayout(new BorderLayout());
@@ -332,7 +423,7 @@ public class SectionAnalyzer extends JPanel {
         JPanel atRiskRow = new JPanel(new BorderLayout());
         atRiskRow.setOpaque(false);
         atRiskRow.setAlignmentX(Component.LEFT_ALIGNMENT);
-        atRiskRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 300));
+        atRiskRow.setMaximumSize(new Dimension(935, 300));
         
         JPanel atRiskCard = createModernCard();
         atRiskCard.setLayout(new BorderLayout());
@@ -340,6 +431,20 @@ public class SectionAnalyzer extends JPanel {
         
         atRiskRow.add(atRiskCard, BorderLayout.CENTER);
         contentWrapper.add(atRiskRow);
+        contentWrapper.add(Box.createVerticalStrut(15));
+        
+        // ROW 5: All Students Ranking Table
+        JPanel rankingRow = new JPanel(new BorderLayout());
+        rankingRow.setOpaque(false);
+        rankingRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+        rankingRow.setMaximumSize(new Dimension(935, 400));
+        
+        JPanel rankingCard = createModernCard();
+        rankingCard.setLayout(new BorderLayout());
+        rankingCard.add(createAllStudentsRankingTable(analyzerDAO), BorderLayout.CENTER);
+        
+        rankingRow.add(rankingCard, BorderLayout.CENTER);
+        contentWrapper.add(rankingRow);
         contentWrapper.add(Box.createVerticalStrut(20));
         
         // Wrap content in JScrollPane
@@ -359,7 +464,7 @@ public class SectionAnalyzer extends JPanel {
         JPanel panel = new JPanel();
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setOpaque(false);
-        panel.setMaximumSize(new Dimension(1250, 120));
+        panel.setMaximumSize(new Dimension(935, 120));
         
         // Header
         JLabel titleLabel = new JLabel("📊 Section Result Analysis");
@@ -370,7 +475,7 @@ public class SectionAnalyzer extends JPanel {
         // Create metric cards in a row
         JPanel metricsPanel = new JPanel(new GridLayout(1, 5, 12, 0));
         metricsPanel.setOpaque(false);
-        metricsPanel.setMaximumSize(new Dimension(1000, 70));
+        metricsPanel.setMaximumSize(new Dimension(935, 70));
         
         if (analysisData != null) {
             double passPercentage = (analysisData.totalStudents > 0) ? 
@@ -418,8 +523,8 @@ public class SectionAnalyzer extends JPanel {
         };
         card.setOpaque(false);
         card.setLayout(new BorderLayout(5, 2));
-        card.setBorder(BorderFactory.createEmptyBorder(10, 15, 10, 15));
-        card.setPreferredSize(new Dimension(150, 60));
+        card.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        card.setPreferredSize(new Dimension(130, 60));
         
         // Top panel with icon and title
         JPanel topPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
@@ -1066,7 +1171,17 @@ public class SectionAnalyzer extends JPanel {
                                 }
                             }
                             
-                            contentWrapper.add(tabsPanel);
+                            // Wrap tabs in horizontal scroll pane
+                            JScrollPane tabsScrollPane = new JScrollPane(tabsPanel);
+                            tabsScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+                            tabsScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
+                            tabsScrollPane.setBorder(BorderFactory.createEmptyBorder());
+                            tabsScrollPane.setOpaque(false);
+                            tabsScrollPane.getViewport().setOpaque(false);
+                            tabsScrollPane.setMaximumSize(new Dimension(Integer.MAX_VALUE, 50));
+                            tabsScrollPane.setAlignmentX(Component.LEFT_ALIGNMENT);
+                            
+                            contentWrapper.add(tabsScrollPane);
                             contentWrapper.add(Box.createVerticalStrut(5));
 
                             // PDF Export Button
@@ -1089,7 +1204,7 @@ public class SectionAnalyzer extends JPanel {
                             JPanel subjectRow = new JPanel(new BorderLayout());
                             subjectRow.setOpaque(false);
                             subjectRow.setAlignmentX(Component.LEFT_ALIGNMENT);
-                            subjectRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 240));
+                            subjectRow.setMaximumSize(new Dimension(935, 240));
                             
                             JPanel subjectPanel = createSubjectTable(analysisData.subjectAnalysisList);
                             subjectRow.add(subjectPanel, BorderLayout.CENTER);
@@ -1101,7 +1216,7 @@ public class SectionAnalyzer extends JPanel {
                             JPanel row2 = new JPanel(new GridLayout(1, 2, 15, 0));
                             row2.setOpaque(false);
                             row2.setAlignmentX(Component.LEFT_ALIGNMENT);
-                            row2.setMaximumSize(new Dimension(Integer.MAX_VALUE, 260));
+                            row2.setMaximumSize(new Dimension(935, 260));
                             
                             JPanel chartCard = createModernCard();
                             chartCard.setLayout(new BorderLayout());
@@ -1121,7 +1236,7 @@ public class SectionAnalyzer extends JPanel {
                             JPanel row3 = new JPanel(new GridLayout(1, 2, 15, 0));
                             row3.setOpaque(false);
                             row3.setAlignmentX(Component.LEFT_ALIGNMENT);
-                            row3.setMaximumSize(new Dimension(Integer.MAX_VALUE, 240));
+                            row3.setMaximumSize(new Dimension(935, 240));
                             
                             JPanel topStudentsCard = createModernCard();
                             topStudentsCard.setLayout(new BorderLayout());
@@ -1141,7 +1256,7 @@ public class SectionAnalyzer extends JPanel {
                             JPanel atRiskRow = new JPanel(new BorderLayout());
                             atRiskRow.setOpaque(false);
                             atRiskRow.setAlignmentX(Component.LEFT_ALIGNMENT);
-                            atRiskRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 300));
+                            atRiskRow.setMaximumSize(new Dimension(935, 300));
                             
                             JPanel atRiskCard = createModernCard();
                             atRiskCard.setLayout(new BorderLayout());
@@ -1191,13 +1306,14 @@ public class SectionAnalyzer extends JPanel {
             // Get all subjects configured for this section (even if no marks yet)
             // Plus all exam types that have marks data
             String query = 
-                "SELECT DISTINCT sub.subject_name, sm.exam_type as exam_name " +
+                "SELECT DISTINCT sub.subject_name, et.exam_name " +
                 "FROM section_subjects ss " +
                 "INNER JOIN subjects sub ON ss.subject_id = sub.id " +
                 "LEFT JOIN student_marks sm ON sm.subject_id = sub.id " +
                 "LEFT JOIN students s ON sm.student_id = s.id AND s.section_id = ss.section_id " +
+                "LEFT JOIN exam_types et ON sm.exam_type_id = et.id " +
                 "WHERE ss.section_id = ? " +
-                "ORDER BY sub.subject_name, sm.exam_type";
+                "ORDER BY sub.subject_name, et.exam_name";
             
             PreparedStatement ps = conn.prepareStatement(query);
             ps.setInt(1, sectionId);
@@ -1695,120 +1811,462 @@ public class SectionAnalyzer extends JPanel {
                 filePath += ".pdf";
             }
             
-            // Create PDF
-            com.itextpdf.text.Document document = new com.itextpdf.text.Document(com.itextpdf.text.PageSize.A4, 50, 50, 50, 50);
-            com.itextpdf.text.pdf.PdfWriter.getInstance(document, new java.io.FileOutputStream(filePath));
+            // Create PDF with LANDSCAPE orientation for wide tables
+            com.itextpdf.text.Document document = new com.itextpdf.text.Document(com.itextpdf.text.PageSize.A4.rotate(), 30, 30, 30, 30);
+            com.itextpdf.text.pdf.PdfWriter writer = com.itextpdf.text.pdf.PdfWriter.getInstance(document, new java.io.FileOutputStream(filePath));
             document.open();
             
-            // Title
-            com.itextpdf.text.Font titleFont = new com.itextpdf.text.Font(com.itextpdf.text.Font.FontFamily.HELVETICA, 18, com.itextpdf.text.Font.BOLD);
-            com.itextpdf.text.Paragraph title = new com.itextpdf.text.Paragraph("Section Analysis Report: " + currentSectionName, titleFont);
+            // Modern Styled Fonts
+            com.itextpdf.text.Font titleFont = new com.itextpdf.text.Font(com.itextpdf.text.Font.FontFamily.HELVETICA, 22, com.itextpdf.text.Font.BOLD, new com.itextpdf.text.BaseColor(79, 70, 229));
+            com.itextpdf.text.Font headingFont = new com.itextpdf.text.Font(com.itextpdf.text.Font.FontFamily.HELVETICA, 16, com.itextpdf.text.Font.BOLD, new com.itextpdf.text.BaseColor(17, 24, 39));
+            com.itextpdf.text.Font subheadingFont = new com.itextpdf.text.Font(com.itextpdf.text.Font.FontFamily.HELVETICA, 12, com.itextpdf.text.Font.BOLD, new com.itextpdf.text.BaseColor(55, 65, 81));
+            com.itextpdf.text.Font normalFont = new com.itextpdf.text.Font(com.itextpdf.text.Font.FontFamily.HELVETICA, 10, com.itextpdf.text.Font.NORMAL, new com.itextpdf.text.BaseColor(55, 65, 81));
+            com.itextpdf.text.Font smallFont = new com.itextpdf.text.Font(com.itextpdf.text.Font.FontFamily.HELVETICA, 8, com.itextpdf.text.Font.NORMAL, new com.itextpdf.text.BaseColor(107, 114, 128));
+            
+            // Modern Header with Border
+            com.itextpdf.text.Paragraph title = new com.itextpdf.text.Paragraph("📊 Section Analysis Report", titleFont);
             title.setAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
-            title.setSpacingAfter(20);
+            title.setSpacingAfter(5);
             document.add(title);
             
-            // Section Result Summary
-            com.itextpdf.text.Font headingFont = new com.itextpdf.text.Font(com.itextpdf.text.Font.FontFamily.HELVETICA, 14, com.itextpdf.text.Font.BOLD);
-            document.add(new com.itextpdf.text.Paragraph("Section Result Summary", headingFont));
+            com.itextpdf.text.Paragraph subtitle = new com.itextpdf.text.Paragraph("Section: " + currentSectionName + " | Generated: " + new java.text.SimpleDateFormat("dd MMM yyyy, hh:mm a").format(new java.util.Date()), normalFont);
+            subtitle.setAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
+            subtitle.setSpacingAfter(15);
+            document.add(subtitle);
+            
+            // Add separator line
+            com.itextpdf.text.pdf.draw.LineSeparator line = new com.itextpdf.text.pdf.draw.LineSeparator();
+            line.setLineColor(new com.itextpdf.text.BaseColor(229, 231, 235));
+            document.add(new com.itextpdf.text.Chunk(line));
             document.add(new com.itextpdf.text.Paragraph(" "));
             
-            com.itextpdf.text.pdf.PdfPTable summaryTable = new com.itextpdf.text.pdf.PdfPTable(5);
-            summaryTable.setWidthPercentage(100);
-            summaryTable.addCell("Total Students");
-            summaryTable.addCell("Pass");
-            summaryTable.addCell("Fail");
-            summaryTable.addCell("Pass %");
-            summaryTable.addCell("Fail %");
+            // ==== SECTION 1: OVERVIEW CARDS ====
+            document.add(new com.itextpdf.text.Paragraph("📈 Overview", headingFont));
+            document.add(new com.itextpdf.text.Paragraph(" "));
+            
+            // Create modern styled summary cards in a table
+            com.itextpdf.text.pdf.PdfPTable overviewTable = new com.itextpdf.text.pdf.PdfPTable(5);
+            overviewTable.setWidthPercentage(100);
+            overviewTable.setSpacingBefore(10);
+            overviewTable.setSpacingAfter(15);
             
             double passPercentage = (analysisData.totalStudents > 0) ? 
                 (analysisData.passStudents * 100.0 / analysisData.totalStudents) : 0;
             double failPercentage = (analysisData.totalStudents > 0) ? 
                 (analysisData.failStudents * 100.0 / analysisData.totalStudents) : 0;
             
-            summaryTable.addCell(String.valueOf(analysisData.totalStudents));
-            summaryTable.addCell(String.valueOf(analysisData.passStudents));
-            summaryTable.addCell(String.valueOf(analysisData.failStudents));
-            summaryTable.addCell(String.format("%.1f%%", passPercentage));
-            summaryTable.addCell(String.format("%.1f%%", failPercentage));
+            // Style cells with background colors
+            com.itextpdf.text.BaseColor headerBg = new com.itextpdf.text.BaseColor(99, 102, 241);
+            com.itextpdf.text.BaseColor cellBg = new com.itextpdf.text.BaseColor(249, 250, 251);
             
-            document.add(summaryTable);
-            document.add(new com.itextpdf.text.Paragraph(" "));
+            // Headers with colored background
+            com.itextpdf.text.pdf.PdfPCell headerCell1 = new com.itextpdf.text.pdf.PdfPCell(new com.itextpdf.text.Phrase("Total Students", new com.itextpdf.text.Font(com.itextpdf.text.Font.FontFamily.HELVETICA, 10, com.itextpdf.text.Font.BOLD, com.itextpdf.text.BaseColor.WHITE)));
+            headerCell1.setBackgroundColor(headerBg);
+            headerCell1.setHorizontalAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
+            headerCell1.setPadding(8);
+            overviewTable.addCell(headerCell1);
+            
+            com.itextpdf.text.pdf.PdfPCell headerCell2 = new com.itextpdf.text.pdf.PdfPCell(new com.itextpdf.text.Phrase("Pass", new com.itextpdf.text.Font(com.itextpdf.text.Font.FontFamily.HELVETICA, 10, com.itextpdf.text.Font.BOLD, com.itextpdf.text.BaseColor.WHITE)));
+            headerCell2.setBackgroundColor(headerBg);
+            headerCell2.setHorizontalAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
+            headerCell2.setPadding(8);
+            overviewTable.addCell(headerCell2);
+            
+            com.itextpdf.text.pdf.PdfPCell headerCell3 = new com.itextpdf.text.pdf.PdfPCell(new com.itextpdf.text.Phrase("Fail", new com.itextpdf.text.Font(com.itextpdf.text.Font.FontFamily.HELVETICA, 10, com.itextpdf.text.Font.BOLD, com.itextpdf.text.BaseColor.WHITE)));
+            headerCell3.setBackgroundColor(headerBg);
+            headerCell3.setHorizontalAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
+            headerCell3.setPadding(8);
+            overviewTable.addCell(headerCell3);
+            
+            com.itextpdf.text.pdf.PdfPCell headerCell4 = new com.itextpdf.text.pdf.PdfPCell(new com.itextpdf.text.Phrase("Pass %", new com.itextpdf.text.Font(com.itextpdf.text.Font.FontFamily.HELVETICA, 10, com.itextpdf.text.Font.BOLD, com.itextpdf.text.BaseColor.WHITE)));
+            headerCell4.setBackgroundColor(headerBg);
+            headerCell4.setHorizontalAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
+            headerCell4.setPadding(8);
+            overviewTable.addCell(headerCell4);
+            
+            com.itextpdf.text.pdf.PdfPCell headerCell5 = new com.itextpdf.text.pdf.PdfPCell(new com.itextpdf.text.Phrase("Fail %", new com.itextpdf.text.Font(com.itextpdf.text.Font.FontFamily.HELVETICA, 10, com.itextpdf.text.Font.BOLD, com.itextpdf.text.BaseColor.WHITE)));
+            headerCell5.setBackgroundColor(headerBg);
+            headerCell5.setHorizontalAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
+            headerCell5.setPadding(8);
+            overviewTable.addCell(headerCell5);
+            
+            // Data cells
+            addStyledCell(overviewTable, String.valueOf(analysisData.totalStudents), cellBg, true);
+            addStyledCell(overviewTable, String.valueOf(analysisData.passStudents), new com.itextpdf.text.BaseColor(220, 252, 231), true);
+            addStyledCell(overviewTable, String.valueOf(analysisData.failStudents), new com.itextpdf.text.BaseColor(254, 226, 226), true);
+            addStyledCell(overviewTable, String.format("%.1f%%", passPercentage), new com.itextpdf.text.BaseColor(220, 252, 231), true);
+            addStyledCell(overviewTable, String.format("%.1f%%", failPercentage), new com.itextpdf.text.BaseColor(254, 226, 226), true);
+            
+            document.add(overviewTable);
             document.add(new com.itextpdf.text.Paragraph(" "));
             
-            // Subject Analysis
-            document.add(new com.itextpdf.text.Paragraph("Subject Analysis", headingFont));
+            // ==== SECTION 2: SUBJECT ANALYSIS ====
+            document.add(new com.itextpdf.text.Paragraph("📚 Subject-wise Performance", headingFont));
             document.add(new com.itextpdf.text.Paragraph(" "));
             
             com.itextpdf.text.pdf.PdfPTable subjectTable = new com.itextpdf.text.pdf.PdfPTable(7);
             subjectTable.setWidthPercentage(100);
-            subjectTable.addCell("Subject");
-            subjectTable.addCell("Total Students");
-            subjectTable.addCell("Pass");
-            subjectTable.addCell("DC");
-            subjectTable.addCell("FC");
-            subjectTable.addCell("SC");
-            subjectTable.addCell("Fail");
+            subjectTable.setSpacingBefore(10);
+            subjectTable.setSpacingAfter(15);
+            
+            com.itextpdf.text.BaseColor subjectHeaderBg = new com.itextpdf.text.BaseColor(99, 102, 241);
+            com.itextpdf.text.Font headerFont = new com.itextpdf.text.Font(com.itextpdf.text.Font.FontFamily.HELVETICA, 9, com.itextpdf.text.Font.BOLD, com.itextpdf.text.BaseColor.WHITE);
+            
+            // Headers
+            String[] subHeaders = {"Subject", "Total", "Pass", "DC", "FC", "SC", "Fail"};
+            for (String header : subHeaders) {
+                com.itextpdf.text.pdf.PdfPCell hCell = new com.itextpdf.text.pdf.PdfPCell(new com.itextpdf.text.Phrase(header, headerFont));
+                hCell.setBackgroundColor(subjectHeaderBg);
+                hCell.setHorizontalAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
+                hCell.setPadding(6);
+                subjectTable.addCell(hCell);
+            }
+            
+            // Data rows with alternating colors
+            com.itextpdf.text.BaseColor row1Bg = new com.itextpdf.text.BaseColor(255, 255, 255);
+            com.itextpdf.text.BaseColor row2Bg = new com.itextpdf.text.BaseColor(249, 250, 251);
+            int rowIdx = 0;
             
             for (AnalyzerDAO.SubjectAnalysis subject : analysisData.subjectAnalysisList) {
-                subjectTable.addCell(subject.subjectName);
-                subjectTable.addCell(String.valueOf(subject.totalStudents));
-                subjectTable.addCell(String.valueOf(subject.passCount));
-                subjectTable.addCell(String.valueOf(subject.distinctionCount));
-                subjectTable.addCell(String.valueOf(subject.firstClassCount));
-                subjectTable.addCell(String.valueOf(subject.secondClassCount));
-                subjectTable.addCell(String.valueOf(subject.failCount));
+                com.itextpdf.text.BaseColor rowBg = (rowIdx++ % 2 == 0) ? row1Bg : row2Bg;
+                addStyledCell(subjectTable, subject.subjectName, rowBg, false);
+                addStyledCell(subjectTable, String.valueOf(subject.totalStudents), rowBg, true);
+                addStyledCell(subjectTable, String.valueOf(subject.passCount), new com.itextpdf.text.BaseColor(220, 252, 231), true);
+                addStyledCell(subjectTable, String.valueOf(subject.distinctionCount), new com.itextpdf.text.BaseColor(254, 249, 195), true);
+                addStyledCell(subjectTable, String.valueOf(subject.firstClassCount), new com.itextpdf.text.BaseColor(254, 249, 195), true);
+                addStyledCell(subjectTable, String.valueOf(subject.secondClassCount), new com.itextpdf.text.BaseColor(254, 249, 195), true);
+                addStyledCell(subjectTable, String.valueOf(subject.failCount), new com.itextpdf.text.BaseColor(254, 226, 226), true);
             }
             
             document.add(subjectTable);
             document.add(new com.itextpdf.text.Paragraph(" "));
-            document.add(new com.itextpdf.text.Paragraph(" "));
             
-            // Top 5 Students
-            document.add(new com.itextpdf.text.Paragraph("Top 5 Students", headingFont));
+            // ==== SECTION 3: TOP 5 STUDENTS ====
+            document.add(new com.itextpdf.text.Paragraph("🏆 Top 5 Students", headingFont));
             document.add(new com.itextpdf.text.Paragraph(" "));
             
             com.itextpdf.text.pdf.PdfPTable topStudentsTable = new com.itextpdf.text.pdf.PdfPTable(4);
             topStudentsTable.setWidthPercentage(100);
-            topStudentsTable.addCell("Rank");
-            topStudentsTable.addCell("Roll No.");
-            topStudentsTable.addCell("Name");
-            topStudentsTable.addCell("Percentage");
+            topStudentsTable.setSpacingBefore(10);
+            topStudentsTable.setSpacingAfter(15);
             
+            // Headers
+            String[] topHeaders = {"Rank", "Roll No.", "Name", "Percentage"};
+            for (String header : topHeaders) {
+                com.itextpdf.text.pdf.PdfPCell hCell = new com.itextpdf.text.pdf.PdfPCell(new com.itextpdf.text.Phrase(header, headerFont));
+                hCell.setBackgroundColor(subjectHeaderBg);
+                hCell.setHorizontalAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
+                hCell.setPadding(6);
+                topStudentsTable.addCell(hCell);
+            }
+            
+            // Data with medal colors for top 3
             int rank = 1;
             for (AnalyzerDAO.TopStudent student : analysisData.topStudents) {
-                topStudentsTable.addCell(String.valueOf(rank++));
-                topStudentsTable.addCell(student.rollNumber);
-                topStudentsTable.addCell(student.name);
-                topStudentsTable.addCell(String.format("%.1f%%", student.percentage));
+                com.itextpdf.text.BaseColor rankBg = row1Bg;
+                if (rank == 1) rankBg = new com.itextpdf.text.BaseColor(255, 215, 0);  // Gold
+                else if (rank == 2) rankBg = new com.itextpdf.text.BaseColor(192, 192, 192);  // Silver
+                else if (rank == 3) rankBg = new com.itextpdf.text.BaseColor(205, 127, 50);  // Bronze
+                else rankBg = (rank % 2 == 0) ? row1Bg : row2Bg;
+                
+                addStyledCell(topStudentsTable, String.valueOf(rank), rankBg, true);
+                addStyledCell(topStudentsTable, student.rollNumber, rankBg, true);
+                addStyledCell(topStudentsTable, student.name, rankBg, false);
+                addStyledCell(topStudentsTable, String.format("%.1f%%", student.percentage), rankBg, true);
+                rank++;
             }
             
             document.add(topStudentsTable);
             document.add(new com.itextpdf.text.Paragraph(" "));
+            
+            // ==== SECTION 4: GRADE DISTRIBUTION ====
+            document.add(new com.itextpdf.text.Paragraph("📊 Grade Distribution", headingFont));
             document.add(new com.itextpdf.text.Paragraph(" "));
             
-            // At-Risk Students
+            List<AnalyzerDAO.GradeDistribution> gradeDistribution = analyzerDAO.getGradeDistribution(currentSectionId, selectedFilters);
+            if (gradeDistribution != null && !gradeDistribution.isEmpty()) {
+                com.itextpdf.text.pdf.PdfPTable gradeTable = new com.itextpdf.text.pdf.PdfPTable(2);
+                gradeTable.setWidthPercentage(60);
+                gradeTable.setSpacingBefore(10);
+                gradeTable.setSpacingAfter(15);
+                
+                // Headers
+                String[] gradeHeaders = {"Grade", "Count"};
+                for (String header : gradeHeaders) {
+                    com.itextpdf.text.pdf.PdfPCell hCell = new com.itextpdf.text.pdf.PdfPCell(new com.itextpdf.text.Phrase(header, headerFont));
+                    hCell.setBackgroundColor(subjectHeaderBg);
+                    hCell.setHorizontalAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
+                    hCell.setPadding(6);
+                    gradeTable.addCell(hCell);
+                }
+                
+                // Data with color coding
+                rowIdx = 0;
+                for (AnalyzerDAO.GradeDistribution gradeData : gradeDistribution) {
+                    com.itextpdf.text.BaseColor gradeBg = row1Bg;
+                    if (gradeData.grade.equals("O") || gradeData.grade.equals("A+")) {
+                        gradeBg = new com.itextpdf.text.BaseColor(220, 252, 231);  // Green for excellent
+                    } else if (gradeData.grade.equals("F")) {
+                        gradeBg = new com.itextpdf.text.BaseColor(254, 226, 226);  // Red for fail
+                    } else {
+                        gradeBg = (rowIdx++ % 2 == 0) ? row1Bg : row2Bg;
+                    }
+                    
+                    addStyledCell(gradeTable, gradeData.grade, gradeBg, true);
+                    addStyledCell(gradeTable, String.valueOf(gradeData.count), gradeBg, true);
+                }
+                
+                document.add(gradeTable);
+            }
+            document.add(new com.itextpdf.text.Paragraph(" "));
+            
+            // ==== SECTION 5: FAILED ANALYSIS ====
+            if (analysisData.failedStudentsMap != null && !analysisData.failedStudentsMap.isEmpty()) {
+                document.add(new com.itextpdf.text.Paragraph("⚠️ Failed Students Analysis", headingFont));
+                document.add(new com.itextpdf.text.Paragraph(" "));
+                
+                com.itextpdf.text.pdf.PdfPTable failedTable = new com.itextpdf.text.pdf.PdfPTable(2);
+                failedTable.setWidthPercentage(60);
+                failedTable.setSpacingBefore(10);
+                failedTable.setSpacingAfter(15);
+                
+                // Headers
+                String[] failedHeaders = {"No. of Failed Subjects", "Student Count"};
+                for (String header : failedHeaders) {
+                    com.itextpdf.text.pdf.PdfPCell hCell = new com.itextpdf.text.pdf.PdfPCell(new com.itextpdf.text.Phrase(header, headerFont));
+                    hCell.setBackgroundColor(new com.itextpdf.text.BaseColor(239, 68, 68));  // Red header
+                    hCell.setHorizontalAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
+                    hCell.setPadding(6);
+                    failedTable.addCell(hCell);
+                }
+                
+                // Data rows
+                rowIdx = 0;
+                for (Map.Entry<Integer, Integer> entry : analysisData.failedStudentsMap.entrySet()) {
+                    com.itextpdf.text.BaseColor rowBg = (rowIdx++ % 2 == 0) ? row1Bg : row2Bg;
+                    addStyledCell(failedTable, String.valueOf(entry.getKey()), rowBg, true);
+                    addStyledCell(failedTable, String.valueOf(entry.getValue()), rowBg, true);
+                }
+                
+                document.add(failedTable);
+            }
+            document.add(new com.itextpdf.text.Paragraph(" "));
+            
+            // ==== SECTION 6: AT-RISK STUDENTS ====
             List<AnalyzerDAO.AtRiskStudent> atRiskStudents = analyzerDAO.getAtRiskStudents(currentSectionId, selectedFilters);
             if (atRiskStudents != null && !atRiskStudents.isEmpty()) {
-                document.add(new com.itextpdf.text.Paragraph("Students at Risk", headingFont));
+                document.add(new com.itextpdf.text.Paragraph("🚨 Students at Risk", headingFont));
                 document.add(new com.itextpdf.text.Paragraph(" "));
                 
                 com.itextpdf.text.pdf.PdfPTable atRiskTable = new com.itextpdf.text.pdf.PdfPTable(5);
                 atRiskTable.setWidthPercentage(100);
-                atRiskTable.addCell("Roll No.");
-                atRiskTable.addCell("Name");
-                atRiskTable.addCell("Percentage");
-                atRiskTable.addCell("Risk Level");
-                atRiskTable.addCell("Failed Subjects");
+                atRiskTable.setSpacingBefore(10);
+                atRiskTable.setSpacingAfter(15);
                 
+                // Headers
+                String[] riskHeaders = {"Roll No.", "Name", "Percentage", "Risk Level", "Failed Subjects"};
+                for (String header : riskHeaders) {
+                    com.itextpdf.text.pdf.PdfPCell hCell = new com.itextpdf.text.pdf.PdfPCell(new com.itextpdf.text.Phrase(header, headerFont));
+                    hCell.setBackgroundColor(new com.itextpdf.text.BaseColor(251, 146, 60));  // Orange header
+                    hCell.setHorizontalAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
+                    hCell.setPadding(6);
+                    atRiskTable.addCell(hCell);
+                }
+                
+                // Data rows with risk level colors
                 for (AnalyzerDAO.AtRiskStudent student : atRiskStudents) {
-                    atRiskTable.addCell(String.valueOf(student.rollNo));
-                    atRiskTable.addCell(student.name);
-                    atRiskTable.addCell(String.format("%.1f%%", student.percentage));
-                    atRiskTable.addCell(student.riskLevel);
-                    atRiskTable.addCell(student.failedSubjects);
+                    com.itextpdf.text.BaseColor rowBg = row1Bg;
+                    if (student.riskLevel.toLowerCase().contains("high")) {
+                        rowBg = new com.itextpdf.text.BaseColor(254, 226, 226);  // Red for high risk
+                    } else if (student.riskLevel.toLowerCase().contains("moderate")) {
+                        rowBg = new com.itextpdf.text.BaseColor(254, 249, 195);  // Yellow for moderate
+                    }
+                    
+                    addStyledCell(atRiskTable, String.valueOf(student.rollNo), rowBg, true);
+                    addStyledCell(atRiskTable, student.name, rowBg, false);
+                    addStyledCell(atRiskTable, String.format("%.1f%%", student.percentage), rowBg, true);
+                    addStyledCell(atRiskTable, student.riskLevel, rowBg, true);
+                    addStyledCell(atRiskTable, student.failedSubjects, rowBg, false);
                 }
                 
                 document.add(atRiskTable);
+            }
+            document.add(new com.itextpdf.text.Paragraph(" "));
+            
+            // ==== SECTION 7: DETAILED RANKING TABLE ====
+            AnalyzerDAO.DetailedRankingData rankingData = analyzerDAO.getDetailedStudentRanking(currentSectionId, selectedFilters);
+            if (rankingData != null && !rankingData.students.isEmpty()) {
+                // Add page break before ranking table
+                document.newPage();
+                
+                document.add(new com.itextpdf.text.Paragraph("📋 Detailed Student Ranking", headingFont));
+                document.add(new com.itextpdf.text.Paragraph("Complete performance breakdown with subject-wise and exam-wise marks", subheadingFont));
+                document.add(new com.itextpdf.text.Paragraph(" "));
+                
+                // Build dynamic columns for the hierarchical table
+                int columnCount = 3; // Rank, Roll No, Name
+                for (AnalyzerDAO.SubjectInfoDetailed subject : rankingData.subjects) {
+                    columnCount += subject.examTypes.size() + 1; // exam types + total
+                }
+                columnCount += 4; // Overall Total, Percentage, Grade, CGPA
+                
+                com.itextpdf.text.pdf.PdfPTable rankingTable = new com.itextpdf.text.pdf.PdfPTable(columnCount);
+                rankingTable.setWidthPercentage(100);
+                rankingTable.setSpacingBefore(10);
+                rankingTable.setHeaderRows(2); // 2-row header for hierarchical structure
+                
+                // Colors
+                com.itextpdf.text.BaseColor primaryHeaderBg = new com.itextpdf.text.BaseColor(79, 70, 229);  // Primary purple
+                com.itextpdf.text.BaseColor secondaryHeaderBg = new com.itextpdf.text.BaseColor(99, 102, 241);  // Secondary blue
+                com.itextpdf.text.Font header1Font = new com.itextpdf.text.Font(com.itextpdf.text.Font.FontFamily.HELVETICA, 9, com.itextpdf.text.Font.BOLD, com.itextpdf.text.BaseColor.WHITE);
+                com.itextpdf.text.Font header2Font = new com.itextpdf.text.Font(com.itextpdf.text.Font.FontFamily.HELVETICA, 8, com.itextpdf.text.Font.BOLD, com.itextpdf.text.BaseColor.WHITE);
+                
+                // ==== ROW 1: Subject Headers with colspan ====
+                // Student Info header spanning 3 columns (Rank, Roll, Name)
+                com.itextpdf.text.pdf.PdfPCell studentInfoCell = new com.itextpdf.text.pdf.PdfPCell(new com.itextpdf.text.Phrase("Student Info", header1Font));
+                studentInfoCell.setColspan(3);
+                studentInfoCell.setBackgroundColor(primaryHeaderBg);
+                studentInfoCell.setHorizontalAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
+                studentInfoCell.setVerticalAlignment(com.itextpdf.text.Element.ALIGN_MIDDLE);
+                studentInfoCell.setPadding(6);
+                rankingTable.addCell(studentInfoCell);
+                
+                // Subject headers spanning their exam types + total column
+                for (AnalyzerDAO.SubjectInfoDetailed subject : rankingData.subjects) {
+                    int subjectColspan = subject.examTypes.size() + 1; // exam types + total
+                    com.itextpdf.text.pdf.PdfPCell subjectCell = new com.itextpdf.text.pdf.PdfPCell(
+                        new com.itextpdf.text.Phrase(subject.subjectName + " (" + subject.maxMarks + ")", header1Font));
+                    subjectCell.setColspan(subjectColspan);
+                    subjectCell.setBackgroundColor(primaryHeaderBg);
+                    subjectCell.setHorizontalAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
+                    subjectCell.setVerticalAlignment(com.itextpdf.text.Element.ALIGN_MIDDLE);
+                    subjectCell.setPadding(6);
+                    rankingTable.addCell(subjectCell);
+                }
+                
+                // Overall Metrics header spanning 4 columns
+                com.itextpdf.text.pdf.PdfPCell overallCell = new com.itextpdf.text.pdf.PdfPCell(new com.itextpdf.text.Phrase("Overall Performance", header1Font));
+                overallCell.setColspan(4);
+                overallCell.setBackgroundColor(primaryHeaderBg);
+                overallCell.setHorizontalAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
+                overallCell.setVerticalAlignment(com.itextpdf.text.Element.ALIGN_MIDDLE);
+                overallCell.setPadding(6);
+                rankingTable.addCell(overallCell);
+                
+                // ==== ROW 2: Individual Column Headers ====
+                // Student info columns
+                String[] studentCols = {"Rank", "Roll No.", "Name"};
+                for (String col : studentCols) {
+                    com.itextpdf.text.pdf.PdfPCell cell = new com.itextpdf.text.pdf.PdfPCell(new com.itextpdf.text.Phrase(col, header2Font));
+                    cell.setBackgroundColor(secondaryHeaderBg);
+                    cell.setHorizontalAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
+                    cell.setVerticalAlignment(com.itextpdf.text.Element.ALIGN_MIDDLE);
+                    cell.setPadding(5);
+                    rankingTable.addCell(cell);
+                }
+                
+                // Exam type columns for each subject
+                for (AnalyzerDAO.SubjectInfoDetailed subject : rankingData.subjects) {
+                    for (String examType : subject.examTypes) {
+                        Integer maxMarks = subject.examTypeMaxMarks.get(examType);
+                        String header = examType + (maxMarks != null && maxMarks > 0 ? " (" + maxMarks + ")" : "");
+                        com.itextpdf.text.pdf.PdfPCell cell = new com.itextpdf.text.pdf.PdfPCell(new com.itextpdf.text.Phrase(header, header2Font));
+                        cell.setBackgroundColor(secondaryHeaderBg);
+                        cell.setHorizontalAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
+                        cell.setVerticalAlignment(com.itextpdf.text.Element.ALIGN_MIDDLE);
+                        cell.setPadding(5);
+                        rankingTable.addCell(cell);
+                    }
+                    // Total column for subject
+                    com.itextpdf.text.pdf.PdfPCell totalCell = new com.itextpdf.text.pdf.PdfPCell(new com.itextpdf.text.Phrase("Total", header2Font));
+                    totalCell.setBackgroundColor(secondaryHeaderBg);
+                    totalCell.setHorizontalAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
+                    totalCell.setVerticalAlignment(com.itextpdf.text.Element.ALIGN_MIDDLE);
+                    totalCell.setPadding(5);
+                    rankingTable.addCell(totalCell);
+                }
+                
+                // Overall metric columns
+                String[] overallCols = {"Total", "Percentage", "Grade", "CGPA"};
+                for (String col : overallCols) {
+                    com.itextpdf.text.pdf.PdfPCell cell = new com.itextpdf.text.pdf.PdfPCell(new com.itextpdf.text.Phrase(col, header2Font));
+                    cell.setBackgroundColor(secondaryHeaderBg);
+                    cell.setHorizontalAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
+                    cell.setVerticalAlignment(com.itextpdf.text.Element.ALIGN_MIDDLE);
+                    cell.setPadding(5);
+                    rankingTable.addCell(cell);
+                }
+                
+                // ==== DATA ROWS ====
+                com.itextpdf.text.Font dataFont = new com.itextpdf.text.Font(com.itextpdf.text.Font.FontFamily.HELVETICA, 7, com.itextpdf.text.Font.NORMAL);
+                com.itextpdf.text.BaseColor gold = new com.itextpdf.text.BaseColor(255, 215, 0);
+                com.itextpdf.text.BaseColor silver = new com.itextpdf.text.BaseColor(192, 192, 192);
+                com.itextpdf.text.BaseColor bronze = new com.itextpdf.text.BaseColor(205, 127, 50);
+                
+                rowIdx = 0;
+                for (AnalyzerDAO.StudentRankingDetail student : rankingData.students) {
+                    // Determine row background color (with rank highlighting)
+                    com.itextpdf.text.BaseColor rowBg;
+                    if (student.rank == 1) rowBg = gold;
+                    else if (student.rank == 2) rowBg = silver;
+                    else if (student.rank == 3) rowBg = bronze;
+                    else rowBg = (rowIdx % 2 == 0) ? row1Bg : row2Bg;
+                    
+                    rowIdx++;
+                    
+                    // Student info cells
+                    addStyledDataCell(rankingTable, String.valueOf(student.rank), rowBg, true, dataFont);
+                    addStyledDataCell(rankingTable, student.rollNumber, rowBg, true, dataFont);
+                    addStyledDataCell(rankingTable, student.studentName, rowBg, false, dataFont);
+                    
+                    // Subject marks with WEIGHTED TOTAL calculation
+                    for (AnalyzerDAO.SubjectInfoDetailed subject : rankingData.subjects) {
+                        Map<String, Double> subjectMarks = student.subjectMarks.get(subject.subjectName);
+                        
+                        if (subjectMarks != null) {
+                            // Add exam type marks
+                            for (String examType : subject.examTypes) {
+                                Double marks = subjectMarks.get(examType);
+                                String display = (marks != null && marks >= 0) ? String.format("%.1f", marks) : "-";
+                                addStyledDataCell(rankingTable, display, rowBg, true, dataFont);
+                            }
+                            
+                            // Calculate WEIGHTED subject total using AnalyzerDAO method
+                            // Get student ID from database
+                            int studentId = getStudentIdByRollNumber(student.rollNumber, currentSectionId);
+                            double weightedPercentage = -1;  // Default to -1 (will show "-")
+                            if (studentId > 0) {
+                                AnalyzerDAO.SubjectPassResult result = analyzerDAO.calculateWeightedSubjectTotalWithPass(
+                                    studentId, currentSectionId, subject.subjectName, null);  // null = use all exam types
+                                // Use percentage directly (0-100 scale) - same as screen table
+                                weightedPercentage = result.percentage;
+                            }
+                            addStyledDataCell(rankingTable, weightedPercentage >= 0 ? String.format("%.2f", weightedPercentage) : "-", rowBg, true, dataFont);
+                        } else {
+                            // No marks for this subject
+                            for (String examType : subject.examTypes) {
+                                addStyledDataCell(rankingTable, "-", rowBg, true, dataFont);
+                            }
+                            addStyledDataCell(rankingTable, "-", rowBg, true, dataFont);
+                        }
+                    }
+                    
+                    // Overall metrics
+                    addStyledDataCell(rankingTable, String.format("%.1f", student.totalMarks), rowBg, true, dataFont);
+                    addStyledDataCell(rankingTable, String.format("%.2f%%", student.percentage), rowBg, true, dataFont);
+                    addStyledDataCell(rankingTable, student.grade, rowBg, true, dataFont);
+                    addStyledDataCell(rankingTable, String.format("%.2f", student.cgpa), rowBg, true, dataFont);
+                }
+                
+                document.add(rankingTable);
+                
+                // Add legend at the bottom
+                document.add(new com.itextpdf.text.Paragraph(" "));
+                com.itextpdf.text.Paragraph legend = new com.itextpdf.text.Paragraph(
+                    "Legend: DC = Distinction Class | FC = First Class | SC = Second Class | Subject totals are weighted based on exam type weightage.", 
+                    smallFont);
+                legend.setAlignment(com.itextpdf.text.Element.ALIGN_LEFT);
+                document.add(legend);
             }
             
             document.close();
@@ -1827,9 +2285,338 @@ public class SectionAnalyzer extends JPanel {
         }
     }
     
+    private JPanel createAllStudentsRankingTable(AnalyzerDAO analyzerDAO) {
+        JPanel panel = new JPanel(new BorderLayout());
+        panel.setOpaque(false);
+        
+        // Header
+        JLabel titleLabel = new JLabel("🏅 All Students Ranking with Subject Details");
+        titleLabel.setFont(new Font("SansSerif", Font.BOLD, 16));
+        titleLabel.setForeground(TEXT_PRIMARY);
+        titleLabel.setBorder(BorderFactory.createEmptyBorder(0, 0, 10, 0));
+        
+        // Get detailed ranking data with subject breakdowns
+        AnalyzerDAO.DetailedRankingData rankingData = analyzerDAO.getDetailedStudentRanking(currentSectionId, selectedFilters);
+        
+        if (rankingData == null || rankingData.students.isEmpty()) {
+            JLabel noDataLabel = new JLabel("No data available");
+            noDataLabel.setHorizontalAlignment(SwingConstants.CENTER);
+            noDataLabel.setFont(new Font("SansSerif", Font.ITALIC, 14));
+            noDataLabel.setForeground(TEXT_SECONDARY);
+            panel.add(titleLabel, BorderLayout.NORTH);
+            panel.add(noDataLabel, BorderLayout.CENTER);
+            return panel;
+        }
+        
+        // Create hierarchical header structure (2-row header)
+        JPanel headerPanel = new JPanel();
+        headerPanel.setLayout(new BoxLayout(headerPanel, BoxLayout.Y_AXIS));
+        headerPanel.setBackground(Color.WHITE);
+        headerPanel.setBorder(BorderFactory.createMatteBorder(0, 0, 2, 0, PRIMARY_DARK));
+        
+        // ROW 1: Subject Names with Total Marks in brackets
+        JPanel subjectNameRow = new JPanel();
+        subjectNameRow.setLayout(new BoxLayout(subjectNameRow, BoxLayout.X_AXIS));
+        subjectNameRow.setBackground(PRIMARY_COLOR);
+        subjectNameRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 35));
+        
+        // Fixed columns
+        addHeaderCell(subjectNameRow, "Student Info", 330, PRIMARY_COLOR, Color.WHITE, Font.BOLD, 12, 3);
+        
+        // Subject name cells with max marks in brackets (span across exam types + total)
+        for (AnalyzerDAO.SubjectInfoDetailed subject : rankingData.subjects) {
+            int subjectColSpan = subject.examTypes.size() + 1; // exam types + total
+            String subjectHeader = subject.subjectName + " (" + subject.maxMarks + ")";
+            int subjectWidth = Math.max(calculateTextWidth(subjectHeader, 12) + 20, subjectColSpan * 85);
+            addHeaderCell(subjectNameRow, subjectHeader, subjectWidth, PRIMARY_COLOR, Color.WHITE, Font.BOLD, 12, subjectColSpan);
+        }
+        
+        addHeaderCell(subjectNameRow, "Overall Metrics", 340, PRIMARY_COLOR, Color.WHITE, Font.BOLD, 12, 4);
+        
+        // ROW 2: Exam Types and Column Names
+        JPanel examTypeRow = new JPanel();
+        examTypeRow.setLayout(new BoxLayout(examTypeRow, BoxLayout.X_AXIS));
+        examTypeRow.setBackground(PRIMARY_COLOR);
+        examTypeRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 35));
+        
+        // Fixed columns
+        addHeaderCell(examTypeRow, "Rank", 50, PRIMARY_COLOR, Color.WHITE, Font.BOLD, 10, 1);
+        addHeaderCell(examTypeRow, "Roll No.", 100, PRIMARY_COLOR, Color.WHITE, Font.BOLD, 10, 1);
+        addHeaderCell(examTypeRow, "Student Name", 180, PRIMARY_COLOR, Color.WHITE, Font.BOLD, 10, 1);
+        
+        // Build column list and widths for data table
+        List<String> columnList = new ArrayList<>();
+        List<Integer> columnWidths = new ArrayList<>();
+        columnList.add("Rank");
+        columnList.add("Roll No.");
+        columnList.add("Student Name");
+        columnWidths.add(50);
+        columnWidths.add(100);
+        columnWidths.add(180);
+        
+        // Exam type columns
+        for (AnalyzerDAO.SubjectInfoDetailed subject : rankingData.subjects) {
+            System.out.println("@@@ SUBJECT: " + subject.subjectName + 
+                " | examTypeMaxMarks map size: " + subject.examTypeMaxMarks.size() + " @@@");
+            for (String examType : subject.examTypes) {
+                Integer examMaxMarks = subject.examTypeMaxMarks.get(examType);
+                System.out.println("@@@ EXAM TYPE DISPLAY: " + examType + 
+                    " | Max Marks: " + examMaxMarks + " @@@");
+                String examHeader = examMaxMarks != null && examMaxMarks > 0 ? 
+                                   examType + " (" + examMaxMarks + ")" : examType;
+                int width = Math.max(calculateTextWidth(examHeader, 10) + 20, 85);
+                addHeaderCell(examTypeRow, examHeader, width, PRIMARY_COLOR, Color.WHITE, Font.PLAIN, 10, 1);
+                columnList.add(examHeader);
+                columnWidths.add(width);
+            }
+            // Total column
+            String totalHeader = "Total";
+            int width = Math.max(calculateTextWidth(totalHeader, 10) + 20, 85);
+            addHeaderCell(examTypeRow, totalHeader, width, PRIMARY_COLOR, Color.WHITE, Font.BOLD, 10, 1);
+            columnList.add(totalHeader);
+            columnWidths.add(width);
+        }
+        
+        // Overall metrics
+        addHeaderCell(examTypeRow, "Overall Total", 85, PRIMARY_COLOR, Color.WHITE, Font.BOLD, 10, 1);
+        addHeaderCell(examTypeRow, "Percentage", 85, PRIMARY_COLOR, Color.WHITE, Font.BOLD, 10, 1);
+        addHeaderCell(examTypeRow, "Grade", 85, PRIMARY_COLOR, Color.WHITE, Font.BOLD, 10, 1);
+        addHeaderCell(examTypeRow, "CGPA", 85, PRIMARY_COLOR, Color.WHITE, Font.BOLD, 10, 1);
+        columnList.add("Overall Total");
+        columnList.add("Percentage");
+        columnList.add("Grade");
+        columnList.add("CGPA");
+        columnWidths.add(85);
+        columnWidths.add(85);
+        columnWidths.add(85);
+        columnWidths.add(85);
+        
+        headerPanel.add(subjectNameRow);
+        headerPanel.add(examTypeRow);
+        
+        // Create data table
+        String[] columns = columnList.toArray(new String[0]);
+        DefaultTableModel model = new DefaultTableModel(columns, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false;
+            }
+        };
+        
+        JTable table = new JTable(model);
+        table.setRowHeight(35);
+        table.setShowGrid(true);
+        table.setGridColor(BORDER_COLOR);
+        table.setIntercellSpacing(new Dimension(1, 1));
+        table.setTableHeader(null); // Remove default header since we have custom one
+        table.setFont(new Font("SansSerif", Font.PLAIN, 11));
+        table.setSelectionBackground(SELECTION_COLOR);
+        table.setSelectionForeground(TEXT_PRIMARY);
+        table.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
+        
+        // Set column widths based on calculated values
+        for (int i = 0; i < columnWidths.size(); i++) {
+            table.getColumnModel().getColumn(i).setPreferredWidth(columnWidths.get(i));
+        }
+        
+        // Custom renderer
+        DefaultTableCellRenderer cellRenderer = new DefaultTableCellRenderer() {
+            @Override
+            public Component getTableCellRendererComponent(JTable table, Object value,
+                    boolean isSelected, boolean hasFocus, int row, int column) {
+                Component c = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
+                
+                if (!isSelected) {
+                    if (row % 2 == 0) {
+                        c.setBackground(Color.WHITE);
+                    } else {
+                        c.setBackground(new Color(249, 250, 251));
+                    }
+                }
+                
+                // Center alignment for all columns except student name
+                if (column == 2) {
+                    ((JLabel) c).setHorizontalAlignment(SwingConstants.LEFT);
+                } else {
+                    ((JLabel) c).setHorizontalAlignment(SwingConstants.CENTER);
+                }
+                
+                // Special formatting for rank column
+                if (column == 0 && value != null) {
+                    try {
+                        int rank = Integer.parseInt(value.toString());
+                        if (rank == 1) {
+                            c.setForeground(new Color(255, 215, 0)); // Gold
+                            setFont(getFont().deriveFont(Font.BOLD));
+                        } else if (rank == 2) {
+                            c.setForeground(new Color(192, 192, 192)); // Silver
+                            setFont(getFont().deriveFont(Font.BOLD));
+                        } else if (rank == 3) {
+                            c.setForeground(new Color(205, 127, 50)); // Bronze
+                            setFont(getFont().deriveFont(Font.BOLD));
+                        } else {
+                            c.setForeground(TEXT_PRIMARY);
+                            setFont(getFont().deriveFont(Font.PLAIN));
+                        }
+                    } catch (NumberFormatException e) {
+                        c.setForeground(TEXT_PRIMARY);
+                    }
+                } else {
+                    c.setForeground(TEXT_PRIMARY);
+                }
+                
+                return c;
+            }
+        };
+        
+        for (int i = 0; i < table.getColumnCount(); i++) {
+            table.getColumnModel().getColumn(i).setCellRenderer(cellRenderer);
+        }
+        
+        // Populate table with weighted calculation for subject totals
+        AnalyzerDAO dao = new AnalyzerDAO();
+        
+        for (AnalyzerDAO.StudentRankingDetail student : rankingData.students) {
+            List<Object> rowData = new ArrayList<>();
+            rowData.add(student.rank);
+            rowData.add(student.rollNumber);
+            rowData.add(student.studentName);
+            
+            // Add subject marks with WEIGHTED calculation for Total (using DAO method)
+            for (AnalyzerDAO.SubjectInfoDetailed subject : rankingData.subjects) {
+                Map<String, Double> subjectMarks = student.subjectMarks.get(subject.subjectName);
+                
+                // Add individual exam type marks
+                for (String examType : subject.examTypes) {
+                    Double marks = subjectMarks != null ? subjectMarks.get(examType) : null;
+                    rowData.add(marks != null ? String.format("%.0f", marks) : "-");
+                }
+                
+                // Calculate weighted total for this subject using the same method as StudentAnalyzer
+                // Find the student ID first
+                int studentId = getStudentIdByRollNumber(student.rollNumber, currentSectionId);
+                
+                if (studentId > 0) {
+                    // Use the same calculation method
+                    Set<String> examTypesFilter = (selectedFilters != null) ? selectedFilters.get(subject.subjectName) : null;
+                    AnalyzerDAO.SubjectPassResult result = dao.calculateWeightedSubjectTotalWithPass(
+                        studentId, currentSectionId, subject.subjectName, examTypesFilter
+                    );
+                    
+                    // Display the weighted percentage (not the raw marks sum)
+                    if (result.percentage >= 0) {
+                        rowData.add(String.format("%.2f", result.percentage));
+                    } else {
+                        rowData.add("FAIL");
+                    }
+                } else {
+                    rowData.add("-");
+                }
+            }
+            
+            rowData.add(String.format("%.0f", student.totalMarks));
+            rowData.add(String.format("%.2f%%", student.percentage));
+            rowData.add(student.grade);
+            rowData.add(String.format("%.2f", student.cgpa));
+            
+            model.addRow(rowData.toArray());
+        }
+        
+        // Create wrapper panel to hold both custom header and table
+        JPanel tableWithHeaderPanel = new JPanel(new BorderLayout());
+        tableWithHeaderPanel.setBackground(Color.WHITE);
+        tableWithHeaderPanel.add(headerPanel, BorderLayout.NORTH);
+        tableWithHeaderPanel.add(table, BorderLayout.CENTER);
+        
+        // Create scroll pane with both horizontal and vertical scrolling
+        JScrollPane scrollPane = new JScrollPane(tableWithHeaderPanel);
+        scrollPane.setBorder(BorderFactory.createLineBorder(BORDER_COLOR, 1));
+        scrollPane.getViewport().setBackground(Color.WHITE);
+        scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_ALWAYS);
+        scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_ALWAYS);
+        scrollPane.setPreferredSize(new Dimension(1000, 320));
+        
+        panel.add(titleLabel, BorderLayout.NORTH);
+        panel.add(scrollPane, BorderLayout.CENTER);
+        
+        return panel;
+    }
+    
+    // Helper method to add header cell with specified properties
+    private void addHeaderCell(JPanel row, String text, int width, Color bg, Color fg, int fontStyle, int fontSize, int colspan) {
+        JLabel cell = new JLabel(text, SwingConstants.CENTER);
+        cell.setFont(new Font("SansSerif", fontStyle, fontSize));
+        cell.setForeground(fg);
+        cell.setBackground(bg);
+        cell.setOpaque(true);
+        cell.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 1, 1, 1, new Color(255, 255, 255, 50)),
+            BorderFactory.createEmptyBorder(5, 5, 5, 5)
+        ));
+        cell.setPreferredSize(new Dimension(width, 30));
+        cell.setMinimumSize(new Dimension(width, 30));
+        cell.setMaximumSize(new Dimension(width, 30));
+        row.add(cell);
+    }
+    
+    // Helper method to calculate text width for dynamic column sizing
+    private int calculateTextWidth(String text, int fontSize) {
+        JLabel dummyLabel = new JLabel(text);
+        dummyLabel.setFont(new Font("SansSerif", Font.PLAIN, fontSize));
+        FontMetrics metrics = dummyLabel.getFontMetrics(dummyLabel.getFont());
+        return metrics.stringWidth(text);
+    }
+    
+    // Helper method to get student ID by roll number
+    private int getStudentIdByRollNumber(String rollNumber, int sectionId) {
+        try {
+            Connection conn = DatabaseConnection.getConnection();
+            String query = "SELECT id FROM students WHERE roll_number = ? AND section_id = ?";
+            PreparedStatement ps = conn.prepareStatement(query);
+            ps.setString(1, rollNumber);
+            ps.setInt(2, sectionId);
+            ResultSet rs = ps.executeQuery();
+            
+            int studentId = 0;
+            if (rs.next()) {
+                studentId = rs.getInt("id");
+            }
+            rs.close();
+            ps.close();
+            return studentId;
+        } catch (SQLException e) {
+            e.printStackTrace();
+            return 0;
+        }
+    }
+    
     private void closePanel() {
         if (onCloseCallback != null) {
             onCloseCallback.run();
         }
+    }
+    
+    // Helper method for styled PDF cells
+    private void addStyledCell(com.itextpdf.text.pdf.PdfPTable table, String content, com.itextpdf.text.BaseColor bg, boolean center) {
+        com.itextpdf.text.Font cellFont = new com.itextpdf.text.Font(com.itextpdf.text.Font.FontFamily.HELVETICA, 10, com.itextpdf.text.Font.NORMAL);
+        com.itextpdf.text.pdf.PdfPCell cell = new com.itextpdf.text.pdf.PdfPCell(new com.itextpdf.text.Phrase(content, cellFont));
+        cell.setBackgroundColor(bg);
+        cell.setPadding(6);
+        if (center) {
+            cell.setHorizontalAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
+        }
+        table.addCell(cell);
+    }
+    
+    // Helper method for data cells with custom font
+    private void addStyledDataCell(com.itextpdf.text.pdf.PdfPTable table, String content, com.itextpdf.text.BaseColor bg, boolean center, com.itextpdf.text.Font font) {
+        com.itextpdf.text.pdf.PdfPCell cell = new com.itextpdf.text.pdf.PdfPCell(new com.itextpdf.text.Phrase(content, font));
+        cell.setBackgroundColor(bg);
+        cell.setPadding(4);
+        cell.setVerticalAlignment(com.itextpdf.text.Element.ALIGN_MIDDLE);
+        if (center) {
+            cell.setHorizontalAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
+        }
+        table.addCell(cell);
     }
 }

@@ -45,12 +45,33 @@ public class StudentEntryDialog extends JPanel {
         String rollNumber;
         String email;
         String phone;
+        int studentId = -1;  // -1 means new student, positive means existing student from DB
+        boolean isModified = false;  // Track if existing student was modified
         
         StudentEntry(String name, String rollNumber, String email, String phone) {
             this.name = name;
             this.rollNumber = rollNumber;
             this.email = email;
             this.phone = phone;
+            this.studentId = -1;  // New student
+        }
+        
+        // Constructor for existing students from database
+        StudentEntry(int studentId, String name, String rollNumber, String email, String phone) {
+            this.studentId = studentId;
+            this.name = name;
+            this.rollNumber = rollNumber;
+            this.email = email;
+            this.phone = phone;
+            this.isModified = false;
+        }
+        
+        boolean isNewStudent() {
+            return studentId == -1;
+        }
+        
+        boolean isExistingStudent() {
+            return studentId > 0;
         }
     }
 
@@ -583,6 +604,13 @@ public class StudentEntryDialog extends JPanel {
             student.rollNumber = rollNumber;
             student.email = email;
             student.phone = phone;
+            
+            // Mark existing students as modified for proper update handling
+            if (student.isExistingStudent()) {
+                student.isModified = true;
+                System.out.println("Marked existing student " + student.studentId + " as modified");
+            }
+            
             editingIndex = -1;
             addButton.setText("Add Student");
         } else {
@@ -834,12 +862,16 @@ public class StudentEntryDialog extends JPanel {
                 sectionId, com.sms.login.LoginScreen.currentUserId);
             
             for (StudentDAO.StudentInfo student : students) {
+                // Use the constructor that includes studentId for existing students
                 studentEntries.add(new StudentEntry(
+                    student.id,          // Include student ID from database
                     student.name,
                     student.rollNumber,
                     student.email != null ? student.email : "",
                     student.phone != null ? student.phone : ""
                 ));
+                
+                System.out.println("Loaded existing student: " + student.name + " (ID: " + student.id + ", Roll: " + student.rollNumber + ")");
             }
             
             refreshStudentList();
@@ -870,50 +902,80 @@ public class StudentEntryDialog extends JPanel {
         try {
             StudentDAO dao = new StudentDAO();
             
-            // Get existing students to filter out
-            List<StudentDAO.StudentInfo> existingStudents = dao.getStudentsBySection(
-                sectionId, com.sms.login.LoginScreen.currentUserId);
-            
-            Set<String> existingRollNumbers = new HashSet<>();
-            for (StudentDAO.StudentInfo existing : existingStudents) {
-                existingRollNumbers.add(existing.rollNumber);
-            }
-            
-            int successCount = 0;
-            int skippedCount = 0;
+            int newStudentsAdded = 0;
+            int existingStudentsUpdated = 0;
+            int failedOperations = 0;
             
             for (StudentEntry student : studentEntries) {
-                if (existingRollNumbers.contains(student.rollNumber)) {
-                    // Skip existing students
-                    skippedCount++;
-                    continue;
-                }
-                
                 // Safe null checks for email and phone
                 String emailValue = (student.email != null && !student.email.trim().isEmpty()) ? student.email.trim() : null;
                 String phoneValue = (student.phone != null && !student.phone.trim().isEmpty()) ? student.phone.trim() : null;
                 
-                // Only save new students
-                boolean success = dao.addStudent(
-                    student.rollNumber,
-                    student.name,
-                    sectionId,
-                    emailValue,
-                    phoneValue,
-                    com.sms.login.LoginScreen.currentUserId
-                );
+                boolean success = false;
                 
-                if (success) successCount++;
+                if (student.isNewStudent()) {
+                    // Add new student
+                    success = dao.addStudent(
+                        student.rollNumber,
+                        student.name,
+                        sectionId,
+                        emailValue,
+                        phoneValue,
+                        com.sms.login.LoginScreen.currentUserId
+                    );
+                    
+                    if (success) {
+                        newStudentsAdded++;
+                        System.out.println("Added new student: " + student.name + " (" + student.rollNumber + ")");
+                    }
+                    
+                } else if (student.isExistingStudent() && student.isModified) {
+                    // Update existing student with all fields including roll number
+                    success = dao.updateStudentComplete(
+                        student.studentId,
+                        student.rollNumber,
+                        student.name,
+                        emailValue,
+                        phoneValue,
+                        com.sms.login.LoginScreen.currentUserId
+                    );
+                    
+                    if (success) {
+                        existingStudentsUpdated++;
+                        System.out.println("Updated existing student " + student.studentId + ": " + student.name + " (" + student.rollNumber + ")");
+                    }
+                    
+                } else {
+                    // Existing student not modified - skip
+                    success = true;
+                }
+                
+                if (!success) {
+                    failedOperations++;
+                    System.out.println("Failed to save student: " + student.name + " (" + student.rollNumber + ")");
+                }
             }
             
-            String message = String.format(
-                "New students added: %d\nExisting students skipped: %d",
-                successCount, skippedCount
-            );
+            // Build result message
+            StringBuilder message = new StringBuilder();
+            if (newStudentsAdded > 0) {
+                message.append("New students added: ").append(newStudentsAdded).append("\n");
+            }
+            if (existingStudentsUpdated > 0) {
+                message.append("Existing students updated: ").append(existingStudentsUpdated).append("\n");
+            }
+            if (failedOperations > 0) {
+                message.append("Failed operations: ").append(failedOperations).append("\n");
+            }
             
-            JOptionPane.showMessageDialog(this, message);
+            if (message.length() == 0) {
+                message.append("No changes to save");
+            }
             
-            if (successCount > 0 || skippedCount == studentEntries.size()) {
+            JOptionPane.showMessageDialog(this, message.toString().trim());
+            
+            // Close if any operations succeeded
+            if (newStudentsAdded > 0 || existingStudentsUpdated > 0) {
                 closePanel();
             }
             
@@ -1013,15 +1075,54 @@ public class StudentEntryDialog extends JPanel {
         StudentEntry student = studentEntries.get(index);
         
         // Custom confirmation dialog
+        String confirmMessage = "Are you sure you want to remove \"" + student.name + "\" (Roll: " + student.rollNumber + ")?";
+        if (student.isExistingStudent()) {
+            confirmMessage += "\n\nThis student exists in the database and will be permanently deleted!";
+        }
+        
         int result = JOptionPane.showConfirmDialog(
             this,
-            "Are you sure you want to remove \"" + student.name + "\" (Roll: " + student.rollNumber + ")?",
+            confirmMessage,
             "Confirm Delete",
             JOptionPane.YES_NO_OPTION,
             JOptionPane.WARNING_MESSAGE
         );
         
         if (result == JOptionPane.YES_OPTION) {
+            boolean success = true;
+            
+            // If it's an existing student, delete from database
+            if (student.isExistingStudent()) {
+                try {
+                    StudentDAO dao = new StudentDAO();
+                    success = dao.deleteStudent(student.studentId, com.sms.login.LoginScreen.currentUserId);
+                    
+                    if (success) {
+                        System.out.println("Successfully deleted student " + student.studentId + " from database: " + student.name);
+                        showTemporaryMessage("Student deleted from database successfully");
+                    } else {
+                        System.out.println("Failed to delete student " + student.studentId + " from database");
+                        JOptionPane.showMessageDialog(this, 
+                            "Failed to delete student from database. Please try again.",
+                            "Delete Failed", 
+                            JOptionPane.ERROR_MESSAGE);
+                        return;
+                    }
+                } catch (Exception e) {
+                    System.out.println("Error deleting student: " + e.getMessage());
+                    JOptionPane.showMessageDialog(this, 
+                        "Error deleting student: " + e.getMessage(),
+                        "Delete Error", 
+                        JOptionPane.ERROR_MESSAGE);
+                    return;
+                }
+            } else {
+                // New student - just remove from temporary list
+                System.out.println("Removing new student from temporary list: " + student.name);
+                showTemporaryMessage("Student removed from list");
+            }
+            
+            // Remove from temporary list
             studentEntries.remove(index);
             
             if (editingIndex == index) {
@@ -1034,9 +1135,6 @@ public class StudentEntryDialog extends JPanel {
             
             refreshStudentList();
             updateStatistics();
-            
-            // Show brief confirmation
-            showTemporaryMessage("Student removed successfully");
         }
     }
 

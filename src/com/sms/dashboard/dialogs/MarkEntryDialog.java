@@ -37,6 +37,41 @@ import java.io.*;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 
+/**
+ * Mark Entry Dialog for entering student marks using WEIGHTED GRADING SYSTEM
+ * 
+ * WEIGHTED MARKS SYSTEM (Current Implementation):
+ * ================================================
+ * Each exam component has a WEIGHTAGE that determines its contribution to the subject total of 100.
+ * Marks are entered DIRECTLY out of weightage (no scaling).
+ * 
+ * HOW IT WORKS:
+ * - Weightage % = Max marks for that component (e.g., 20% = enter 0-20 marks)
+ * - Subject Total = Σ(marks obtained in each component) out of 100
+ * - All component weightages MUST sum to 100%
+ * 
+ * PASSING CRITERIA (DUAL REQUIREMENT):
+ * - Student must score >= passing marks in EACH component (component-level pass)
+ * - Student must score >= subject passing total (subject-level pass)
+ * - Failing ANY component = FAIL (even if total is passing)
+ * 
+ * REALISTIC EXAMPLE (CLOUD COMPUTING):
+ * Components:
+ *   - Internal 1 (Weightage: 20%, Pass: 8)  → Enter 0-20 marks
+ *   - Internal 2 (Weightage: 25%, Pass: 10) → Enter 0-25 marks
+ *   - Internal 3 (Weightage: 15%, Pass: 6)  → Enter 0-15 marks
+ *   - Final Exam (Weightage: 40%, Pass: 16) → Enter 0-40 marks
+ * 
+ * Student scores: 16, 20, 12, 32
+ * Subject Total = 16 + 20 + 12 + 32 = 80/100 ✅ PASS
+ * (All components passed: 16>=8, 20>=10, 12>=6, 32>=16)
+ * 
+ * Student scores: 5, 20, 12, 35
+ * Subject Total = 5 + 20 + 12 + 35 = 72/100 ❌ FAIL
+ * (Failed Internal 1: 5 < 8, even though total is 72)
+ * 
+ * See WEIGHTED_CALCULATION_SYSTEM.md for complete documentation.
+ */
 public class MarkEntryDialog extends JPanel {
     private JFrame parentFrame;
     private Runnable onCloseCallback;
@@ -68,11 +103,15 @@ public class MarkEntryDialog extends JPanel {
         int id;
         String name;
         int maxMarks;
+        int weightage;
+        int passingMarks;
         
-        ExamTypeInfo(int id, String name, int maxMarks) {
+        ExamTypeInfo(int id, String name, int maxMarks, int weightage, int passingMarks) {
             this.id = id;
             this.name = name;
             this.maxMarks = maxMarks;
+            this.weightage = weightage;
+            this.passingMarks = passingMarks;
         }
     }
     
@@ -385,14 +424,21 @@ public class MarkEntryDialog extends JPanel {
                 
                 setBorder(BorderFactory.createEmptyBorder(0, 16, 0, 16));
                 
-                if (column == 2 && value != null && !value.toString().isEmpty()) {
+                // Color code marks columns (column 2 onwards for exam types)
+                if (column >= 2 && column < 2 + examTypes.size() && value != null && !value.toString().isEmpty()) {
                     try {
                         int mark = Integer.parseInt(value.toString());
-                        if (mark < 40) {
-                            c.setBackground(new Color(254, 226, 226)); // Light red
+                        int examIndex = column - 2;
+                        ExamTypeInfo examInfo = examTypes.get(examIndex);
+                        int passingMark = examInfo.passingMarks;
+                        int maxMark = examInfo.maxMarks;
+                        
+                        // Color based on component passing marks
+                        if (mark < passingMark) {
+                            c.setBackground(new Color(254, 226, 226)); // Light red - FAIL
                             setForeground(new Color(153, 27, 27));
-                        } else if (mark >= 80) {
-                            c.setBackground(new Color(220, 252, 231)); // Light green
+                        } else if (mark >= (maxMark * 0.8)) {  // 80% or above
+                            c.setBackground(new Color(220, 252, 231)); // Light green - Excellent
                             setForeground(new Color(22, 101, 52));
                         } else {
                             c.setBackground(cardBackground);
@@ -400,7 +446,7 @@ public class MarkEntryDialog extends JPanel {
                         }
                     } catch (NumberFormatException e) {
                         if (value.toString().equalsIgnoreCase("ABS")) {
-                            c.setBackground(new Color(254, 243, 199)); // Light yellow
+                            c.setBackground(new Color(254, 243, 199)); // Light yellow - Absent
                             setForeground(new Color(146, 64, 14));
                         } else {
                             c.setBackground(cardBackground);
@@ -1016,18 +1062,51 @@ private void debugDropdownStates() {
                             examTypes.add(new ExamTypeInfo(
                                 rs.getInt("id"),
                                 rs.getString("component_name"),
-                                rs.getInt("max_marks")
+                                rs.getInt("max_marks"),
+                                100,  // weightage (flexible components contribute full marks)
+                                0     // passingMarks (flexible system may not have passing marks)
                             ));
                         }
                     }
                 }
             } else {
-                // Load traditional exam types
-                String query = "SELECT DISTINCT et.id, et.exam_name, et.weightage " +
-                             "FROM exam_types et " +
-                             "INNER JOIN subject_exam_types set_table ON et.id = set_table.exam_type_id " +
-                             "WHERE set_table.section_id = ? AND set_table.subject_id = ? " +
-                             "ORDER BY et.id";
+                // Load exam types with SCALED SYSTEM (Option B: max_marks ≠ weightage)
+                // Check if max_marks column exists
+                boolean hasMaxMarksColumn = false;
+                try {
+                    DatabaseMetaData dbMetaData = conn.getMetaData();
+                    ResultSet columns = dbMetaData.getColumns(null, null, "exam_types", "max_marks");
+                    hasMaxMarksColumn = columns.next();
+                    columns.close();
+                } catch (SQLException e) {
+                    System.out.println("[WARN] Could not check for max_marks column: " + e.getMessage());
+                }
+                
+                String query;
+                if (hasMaxMarksColumn) {
+                    // Option B: Scaled system (max_marks separate from weightage)
+                    query = "SELECT DISTINCT et.id, et.exam_name, et.max_marks, et.weightage, et.passing_marks " +
+                           "FROM exam_types et " +
+                           "INNER JOIN subject_exam_types set_table ON et.id = set_table.exam_type_id " +
+                           "WHERE set_table.section_id = ? AND set_table.subject_id = ? " +
+                           "ORDER BY et.id";
+                } else {
+                    // Option A: Direct entry (weightage = max_marks)
+                    query = "SELECT DISTINCT et.id, et.exam_name, et.weightage, et.passing_marks " +
+                           "FROM exam_types et " +
+                           "INNER JOIN subject_exam_types set_table ON et.id = set_table.exam_type_id " +
+                           "WHERE set_table.section_id = ? AND set_table.subject_id = ? " +
+                           "ORDER BY et.id";
+                }
+                
+                System.out.println("\n=== Loading Exam Types for Mark Entry ===");
+                if (hasMaxMarksColumn) {
+                    System.out.println("Mode: SCALED SYSTEM (Option B)");
+                    System.out.println("Enter marks out of max_marks, system will scale by weightage");
+                } else {
+                    System.out.println("Mode: DIRECT ENTRY (Option A)");
+                    System.out.println("Weightage = Max marks (contribution to 100)");
+                }
                 
                 try (PreparedStatement ps = conn.prepareStatement(query)) {
                     ps.setInt(1, currentSectionId);
@@ -1035,31 +1114,53 @@ private void debugDropdownStates() {
                     
                     try (ResultSet rs = ps.executeQuery()) {
                         while (rs.next()) {
+                            int examId = rs.getInt("id");
+                            String examName = rs.getString("exam_name");
+                            int maxMarks;
+                            int weightage;
+                            int passingMarks = rs.getInt("passing_marks");
+                            
+                            if (hasMaxMarksColumn) {
+                                maxMarks = rs.getInt("max_marks");
+                                weightage = rs.getInt("weightage");
+                                if (maxMarks == 0) maxMarks = weightage; // Fallback
+                                System.out.println("  " + examName + ": Enter marks out of " + maxMarks + " (Contributes " + weightage + "%, Pass: " + passingMarks + ")");
+                            } else {
+                                weightage = rs.getInt("weightage");
+                                maxMarks = weightage; // Option A: weightage = max_marks
+                                System.out.println("  " + examName + ": Enter marks out of " + maxMarks + " (Pass: " + passingMarks + ")");
+                            }
+                            
                             examTypes.add(new ExamTypeInfo(
-                                rs.getInt("id"),
-                                rs.getString("exam_name"),
-                                rs.getInt("weightage")
+                                examId,
+                                examName,
+                                maxMarks,
+                                weightage,
+                                passingMarks
                             ));
                         }
                     }
                 }
+                System.out.println("==============================\n");
             }
             
             // FALLBACK: If no exam types configured but marks exist, auto-detect from student_marks table
             if (examTypes.isEmpty()) {
-                String fallbackQuery = "SELECT DISTINCT exam_type, MAX(marks_obtained) as max_marks_found " +
-                                     "FROM student_marks " +
-                                     "WHERE subject_id = ? " +
-                                     "GROUP BY exam_type " +
-                                     "ORDER BY exam_type";
+                String fallbackQuery = "SELECT DISTINCT et.id, et.exam_name, et.weightage, MAX(sm.marks_obtained) as max_marks_found " +
+                                     "FROM student_marks sm " +
+                                     "JOIN exam_types et ON sm.exam_type_id = et.id " +
+                                     "WHERE sm.subject_id = ? " +
+                                     "GROUP BY et.id, et.exam_name, et.weightage " +
+                                     "ORDER BY et.id";
                 
                 try (PreparedStatement ps = conn.prepareStatement(fallbackQuery)) {
                     ps.setInt(1, currentSubjectId);
                     
                     try (ResultSet rs = ps.executeQuery()) {
-                        int autoId = -1; // Use negative IDs for auto-detected exam types
                         while (rs.next()) {
-                            String examTypeName = rs.getString("exam_type");
+                            int examId = rs.getInt("id");
+                            String examTypeName = rs.getString("exam_name");
+                            int weightage = rs.getInt("weightage");
                             int maxMarksFound = rs.getInt("max_marks_found");
                             
                             // Get max_marks from section_subjects if available
@@ -1080,9 +1181,11 @@ private void debugDropdownStates() {
                             }
                             
                             examTypes.add(new ExamTypeInfo(
-                                autoId--,  // Negative ID for text-based exam types
+                                examId,  // Use actual ID from exam_types table
                                 examTypeName,
-                                maxMarks
+                                Math.max(weightage, maxMarks),  // Use weightage or maxMarks, whichever is higher
+                                weightage,  // weightage
+                                0  // passingMarks (unknown in fallback)
                             ));
                         }
                     }
@@ -1119,16 +1222,23 @@ private void debugDropdownStates() {
         
         marksTable.setModel(tableModel);
         
-        // Set column widths
-        marksTable.getColumnModel().getColumn(0).setPreferredWidth(80);  // Roll No
-        marksTable.getColumnModel().getColumn(1).setPreferredWidth(150); // Student Name
+        // Set column widths - auto-calculate based on content
+        marksTable.getColumnModel().getColumn(0).setPreferredWidth(100);  // Roll No
+        marksTable.getColumnModel().getColumn(1).setPreferredWidth(200); // Student Name
         
+        // Auto-size exam columns based on header text length
         for (int i = 2; i < examTypes.size() + 2; i++) {
-            marksTable.getColumnModel().getColumn(i).setPreferredWidth(100); // Exam marks
+            ExamTypeInfo examInfo = examTypes.get(i - 2);
+            String headerText = examInfo.name + " (" + examInfo.maxMarks + ")";
+            
+            // Calculate width based on text length: ~10 pixels per character, minimum 150px
+            int calculatedWidth = Math.max(150, headerText.length() * 10);
+            marksTable.getColumnModel().getColumn(i).setPreferredWidth(calculatedWidth);
+            marksTable.getColumnModel().getColumn(i).setMinWidth(150);  // Minimum width
         }
         
-        marksTable.getColumnModel().getColumn(examTypes.size() + 2).setPreferredWidth(80);  // Total
-        marksTable.getColumnModel().getColumn(examTypes.size() + 3).setPreferredWidth(100); // Status
+        marksTable.getColumnModel().getColumn(examTypes.size() + 2).setPreferredWidth(100);  // Total
+        marksTable.getColumnModel().getColumn(examTypes.size() + 3).setPreferredWidth(120); // Status
         
         // Add custom cell editor for validation
         for (int i = 0; i < examTypes.size(); i++) {
@@ -1242,44 +1352,26 @@ private void debugDropdownStates() {
             ExamTypeInfo exam = examTypes.get(examIndex);
             
             try (Connection conn = DatabaseConnection.getConnection()) {
-                String query;
-                
-                // Check if this is a text-based exam type (negative ID) or regular exam_type_id
-                if (exam.id < 0) {
-                    // Load from student_marks table using text exam_type
-                    query = "SELECT s.roll_number, m.marks_obtained " +
-                           "FROM student_marks m " +
-                           "JOIN students s ON m.student_id = s.id " +
-                           "WHERE m.exam_type = ? AND m.subject_id = ?";
-                } else {
-                    // Load from marks table using exam_type_id
-                    query = "SELECT s.roll_number, m.marks " +
-                           "FROM marks m " +
-                           "JOIN students s ON m.student_id = s.id " +
-                           "WHERE m.exam_type_id = ? AND m.subject_id = ?";
-                }
+                // Load marks from student_marks table using exam_type_id FK
+                String query = "SELECT s.roll_number, sm.marks_obtained " +
+                              "FROM student_marks sm " +
+                              "JOIN students s ON sm.student_id = s.id " +
+                              "WHERE sm.exam_type_id = ? AND sm.subject_id = ?";
                 
                 try (PreparedStatement ps = conn.prepareStatement(query)) {
-                    if (exam.id < 0) {
-                        ps.setString(1, exam.name);  // Text exam type
-                        ps.setInt(2, currentSubjectId);
-                    } else {
-                        ps.setInt(1, exam.id);  // Integer exam_type_id
-                        ps.setInt(2, currentSubjectId);
-                    }
+                    ps.setInt(1, exam.id);  // exam_type_id
+                    ps.setInt(2, currentSubjectId);
                     
                     try (ResultSet rs = ps.executeQuery()) {
-                        if (rs != null && rs.getMetaData().getColumnCount() > 0) {
-                            while (rs.next()) {
-                                String rollNumber = rs.getString("roll_number");
-                                double marks = rs.getDouble(exam.id < 0 ? "marks_obtained" : "marks");
-                                
-                                // Find student row and set marks
-                                for (int row = 0; row < tableModel.getRowCount(); row++) {
-                                    if (tableModel.getValueAt(row, 0).equals(rollNumber)) {
-                                        tableModel.setValueAt(String.valueOf(marks), row, examIndex + 2);
-                                        break;
-                                    }
+                        while (rs.next()) {
+                            String rollNumber = rs.getString("roll_number");
+                            int marks = rs.getInt("marks_obtained");
+                            
+                            // Find student row and set marks
+                            for (int row = 0; row < tableModel.getRowCount(); row++) {
+                                if (tableModel.getValueAt(row, 0).equals(rollNumber)) {
+                                    tableModel.setValueAt(String.valueOf(marks), row, examIndex + 2);
+                                    break;
                                 }
                             }
                         }
@@ -1309,11 +1401,17 @@ private void debugDropdownStates() {
             double total = 0;
             int filledCount = 0;
             
+            // Apply SCALED CALCULATION: (marks_obtained / max_marks) × weightage
             for (int i = 0; i < examTypes.size(); i++) {
                 Object value = tableModel.getValueAt(row, i + 2);
                 if (value != null && !value.toString().trim().isEmpty()) {
                     try {
-                        total += Double.parseDouble(value.toString());
+                        double marksObtained = Double.parseDouble(value.toString());
+                        ExamTypeInfo examInfo = examTypes.get(i);
+                        
+                        // Scaled contribution = (marks_obtained / max_marks) × weightage
+                        double contribution = (marksObtained / examInfo.maxMarks) * examInfo.weightage;
+                        total += contribution;
                         filledCount++;
                     } catch (NumberFormatException e) {
                         // Ignore invalid values
@@ -1365,68 +1463,32 @@ private void debugDropdownStates() {
                 try (Connection conn = DatabaseConnection.getConnection()) {
                     if (value.isEmpty()) {
                         // Delete mark if value is empty
-                        if (exam.id < 0) {
-                            // Text-based exam type - use student_marks table
-                            String deleteQuery = "DELETE FROM student_marks WHERE student_id = ? AND exam_type = ? AND subject_id = ?";
-                            try (PreparedStatement ps = conn.prepareStatement(deleteQuery)) {
-                                ps.setInt(1, studentId);
-                                ps.setString(2, exam.name);
-                                ps.setInt(3, currentSubjectId);
-                                ps.executeUpdate();
-                            }
-                        } else {
-                            // ID-based exam type - use marks table
-                            String deleteQuery = "DELETE FROM marks WHERE student_id = ? AND exam_type_id = ? AND subject_id = ?";
-                            try (PreparedStatement ps = conn.prepareStatement(deleteQuery)) {
-                                ps.setInt(1, studentId);
-                                ps.setInt(2, exam.id);
-                                ps.setInt(3, currentSubjectId);
-                                ps.executeUpdate();
-                            }
+                        String deleteQuery = "DELETE FROM student_marks WHERE student_id = ? AND exam_type_id = ? AND subject_id = ?";
+                        try (PreparedStatement ps = conn.prepareStatement(deleteQuery)) {
+                            ps.setInt(1, studentId);
+                            ps.setInt(2, exam.id);
+                            ps.setInt(3, currentSubjectId);
+                            ps.executeUpdate();
                         }
                     } else {
-                        if (exam.id < 0) {
-                            // Text-based exam type - use student_marks table
-                            // Delete existing mark first
-                            String deleteQuery = "DELETE FROM student_marks WHERE student_id = ? AND exam_type = ? AND subject_id = ?";
-                            try (PreparedStatement ps = conn.prepareStatement(deleteQuery)) {
-                                ps.setInt(1, studentId);
-                                ps.setString(2, exam.name);
-                                ps.setInt(3, currentSubjectId);
-                                ps.executeUpdate();
-                            }
-                            
-                            // Insert new mark
-                            String insertQuery = "INSERT INTO student_marks (student_id, exam_type, subject_id, marks_obtained, created_by) VALUES (?, ?, ?, ?, ?)";
-                            try (PreparedStatement ps = conn.prepareStatement(insertQuery)) {
-                                ps.setInt(1, studentId);
-                                ps.setString(2, exam.name);
-                                ps.setInt(3, currentSubjectId);
-                                ps.setInt(4, Integer.parseInt(value));
-                                ps.setInt(5, currentUserId);
-                                ps.executeUpdate();
-                            }
-                        } else {
-                            // ID-based exam type - use marks table
-                            // Delete existing mark first
-                            String deleteQuery = "DELETE FROM marks WHERE student_id = ? AND exam_type_id = ? AND subject_id = ?";
-                            try (PreparedStatement ps = conn.prepareStatement(deleteQuery)) {
-                                ps.setInt(1, studentId);
-                                ps.setInt(2, exam.id);
-                                ps.setInt(3, currentSubjectId);
-                                ps.executeUpdate();
-                            }
-                            
-                            // Insert new mark
-                            String insertQuery = "INSERT INTO marks (student_id, exam_type_id, subject_id, marks, created_by) VALUES (?, ?, ?, ?, ?)";
-                            try (PreparedStatement ps = conn.prepareStatement(insertQuery)) {
-                                ps.setInt(1, studentId);
-                                ps.setInt(2, exam.id);
-                                ps.setInt(3, currentSubjectId);
-                                ps.setDouble(4, Double.parseDouble(value));
-                                ps.setInt(5, currentUserId);
-                                ps.executeUpdate();
-                            }
+                        // Delete existing mark first (to handle updates)
+                        String deleteQuery = "DELETE FROM student_marks WHERE student_id = ? AND exam_type_id = ? AND subject_id = ?";
+                        try (PreparedStatement ps = conn.prepareStatement(deleteQuery)) {
+                            ps.setInt(1, studentId);
+                            ps.setInt(2, exam.id);
+                            ps.setInt(3, currentSubjectId);
+                            ps.executeUpdate();
+                        }
+                        
+                        // Insert new mark using exam_type_id FK
+                        String insertQuery = "INSERT INTO student_marks (student_id, exam_type_id, subject_id, marks_obtained, created_by) VALUES (?, ?, ?, ?, ?)";
+                        try (PreparedStatement ps = conn.prepareStatement(insertQuery)) {
+                            ps.setInt(1, studentId);
+                            ps.setInt(2, exam.id);  // exam_type_id FK
+                            ps.setInt(3, currentSubjectId);
+                            ps.setInt(4, Integer.parseInt(value));
+                            ps.setInt(5, currentUserId);
+                            ps.executeUpdate();
                         }
                     }
                 } catch (Exception e) {
