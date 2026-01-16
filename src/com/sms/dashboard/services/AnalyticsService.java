@@ -25,7 +25,7 @@ public class AnalyticsService {
         String yearFilter = (academicYear > 0) ? " AND sec.academic_year = " + academicYear : "";
         
         String query = "SELECT AVG((sm.marks_obtained / ss.max_marks) * 100) as avg_percentage " +
-                      "FROM student_marks sm " +
+                      "FROM entered_exam_marks sm " +
                       "INNER JOIN section_subjects ss ON sm.subject_id = ss.subject_id " +
                       "INNER JOIN students s ON sm.student_id = s.id " +
                       "INNER JOIN sections sec ON s.section_id = sec.id " +
@@ -66,7 +66,7 @@ public class AnalyticsService {
                       "FROM (" +
                       "  SELECT s.id as student_id, AVG((sm.marks_obtained / ss.max_marks) * 100) as avg_pct " +
                       "  FROM students s " +
-                      "  INNER JOIN student_marks sm ON s.id = sm.student_id " +
+                      "  INNER JOIN entered_exam_marks sm ON s.id = sm.student_id " +
                       "  INNER JOIN section_subjects ss ON sm.subject_id = ss.subject_id AND s.section_id = ss.section_id " +
                       "  WHERE s.created_by = ? AND sm.marks_obtained IS NOT NULL AND ss.max_marks > 0 " +
                       "  GROUP BY s.id" +
@@ -105,7 +105,7 @@ public class AnalyticsService {
         String query = "SELECT MAX(avg_pct) as highest " +
                       "FROM (" +
                       "  SELECT AVG((sm.marks_obtained / ss.max_marks) * 100) as avg_pct " +
-                      "  FROM student_marks sm " +
+                      "  FROM entered_exam_marks sm " +
                       "  INNER JOIN students s ON sm.student_id = s.id " +
                       "  INNER JOIN section_subjects ss ON sm.subject_id = ss.subject_id AND s.section_id = ss.section_id " +
                       "  WHERE s.created_by = ? AND sm.marks_obtained IS NOT NULL AND ss.max_marks > 0 " +
@@ -145,7 +145,7 @@ public class AnalyticsService {
         String query = "SELECT MIN(avg_pct) as lowest " +
                       "FROM (" +
                       "  SELECT AVG((sm.marks_obtained / ss.max_marks) * 100) as avg_pct " +
-                      "  FROM student_marks sm " +
+                      "  FROM entered_exam_marks sm " +
                       "  INNER JOIN students s ON sm.student_id = s.id " +
                       "  INNER JOIN section_subjects ss ON sm.subject_id = ss.subject_id AND s.section_id = ss.section_id " +
                       "  WHERE s.created_by = ? AND sm.marks_obtained IS NOT NULL AND ss.max_marks > 0 " +
@@ -236,7 +236,7 @@ public class AnalyticsService {
                     String topPerformerQuery = "SELECT s." + nameCol + " as student_name, AVG((sm.marks_obtained / ss.max_marks) * 100) as avg_pct " +
                                              "FROM students s " +
                                              "INNER JOIN sections sec ON s.section_id = sec.id " +
-                                             "INNER JOIN student_marks sm ON s.id = sm.student_id " +
+                                             "INNER JOIN entered_exam_marks sm ON s.id = sm.student_id " +
                                              "INNER JOIN section_subjects ss ON sm.subject_id = ss.subject_id AND s.section_id = ss.section_id " +
                                              "WHERE s.created_by = ? AND sm.marks_obtained IS NOT NULL AND ss.max_marks > 0" + yearFilter + " " +
                                              "GROUP BY s.id, s." + nameCol + " " +
@@ -268,8 +268,8 @@ public class AnalyticsService {
             }
             stats.put("topPerformer", topPerformer);
             
-            // Recent updates - count of student_marks entries from last 30 days
-            String recentQuery = "SELECT COUNT(*) as count FROM student_marks sm " +
+            // Recent updates - count of entered_exam_marks entries from last 30 days
+            String recentQuery = "SELECT COUNT(*) as count FROM entered_exam_marks sm " +
                                "INNER JOIN students s ON sm.student_id = s.id " +
                                "WHERE s.created_by = ? AND sm.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
             try {

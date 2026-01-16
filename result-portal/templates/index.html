@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Result Portal</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo-section">
+                <div class="logo">
+                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="3" y="13" width="4" height="8" rx="1" fill="#667eea"/>
+                        <rect x="10" y="8" width="4" height="13" rx="1" fill="#764ba2"/>
+                        <rect x="17" y="3" width="4" height="18" rx="1" fill="#667eea"/>
+                    </svg>
+                </div>
+                <div class="logo-text">
+                    <h1>Student Result Portal</h1>
+                    <p>View Your Academic Results</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section Selection & Login -->
+        <div class="card">
+            <h2 style="margin-bottom: 20px; color: #333;">Enter Your Details</h2>
+            
+            <div id="alertContainer"></div>
+            
+            <div class="form-group">
+                <label for="sectionSelect">Section</label>
+                <select id="sectionSelect" class="form-control">
+                    <option value="">-- Loading sections... --</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="rollNumber">Roll Number</label>
+                <input type="text" id="rollNumber" class="form-control" placeholder="Enter your roll number">
+            </div>
+
+            <button onclick="viewResults()" class="btn btn-primary btn-block">View My Results</button>
+        </div>
+    </div>
+
+    <script>
+        // Load sections on page load
+        window.onload = function() {
+            loadSections();
+        };
+
+        function loadSections() {
+            fetch('/api/sections')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        const select = document.getElementById('sectionSelect');
+                        select.innerHTML = '<option value="">-- Select your section --</option>';
+                        
+                        data.sections.forEach(section => {
+                            const option = document.createElement('option');
+                            option.value = section.id;
+                            option.textContent = `${section.section_name} (Year: ${section.academic_year || 'N/A'}, Sem: ${section.semester || 'N/A'})`;
+                            select.appendChild(option);
+                        });
+                    } else {
+                        showAlert('alertContainer', 'Error loading sections: ' + data.error, 'error');
+                    }
+                })
+                .catch(error => {
+                    showAlert('alertContainer', 'Failed to connect to server', 'error');
+                    console.error('Error:', error);
+                });
+        }
+
+        function viewResults() {
+            const sectionId = document.getElementById('sectionSelect').value;
+            const rollNumber = document.getElementById('rollNumber').value.trim();
+
+            if (!sectionId) {
+                showAlert('alertContainer', 'Please select your section', 'error');
+                return;
+            }
+
+            if (!rollNumber) {
+                showAlert('alertContainer', 'Please enter your roll number', 'error');
+                return;
+            }
+
+            // Show loading
+            const btn = event.target;
+            const originalText = btn.textContent;
+            btn.textContent = 'Loading...';
+            btn.disabled = true;
+
+            fetch('/api/verify-student', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    section_id: sectionId,
+                    roll_number: rollNumber
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                btn.textContent = originalText;
+                btn.disabled = false;
+
+                if (data.success) {
+                    // Redirect to results page
+                    window.location.href = `/results/${data.student_id}`;
+                } else {
+                    showAlert('alertContainer', data.error, 'error');
+                }
+            })
+            .catch(error => {
+                btn.textContent = originalText;
+                btn.disabled = false;
+                showAlert('alertContainer', 'Failed to verify student. Please try again.', 'error');
+                console.error('Error:', error);
+            });
+        }
+
+        function showAlert(containerId, message, type) {
+            const container = document.getElementById(containerId);
+            const alertClass = type === 'success' ? 'alert-success' : 
+                              type === 'info' ? 'alert-info' : 'alert-error';
+            
+            container.innerHTML = `
+                <div class="alert ${alertClass} show">
+                    ${message}
+                </div>
+            `;
+
+            setTimeout(() => {
+                container.innerHTML = '';
+            }, 5000);
+        }
+
+        // Allow Enter key to submit
+        document.getElementById('rollNumber').addEventListener('keypress', function(event) {
+            if (event.key === 'Enter') {
+                viewResults();
+            }
+        });
+    </script>
+</body>
+</html>

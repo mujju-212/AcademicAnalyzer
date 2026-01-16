@@ -1,245 +1,344 @@
 package com.sms.resultlauncher;
 
-import java.io.*;
+import com.sms.database.DatabaseConnection;
+import com.sms.util.ConfigLoader;
+
+import java.io.OutputStreamWriter;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
-import java.util.ArrayList;
+import java.sql.ResultSet;
 import java.util.List;
-import javax.swing.JOptionPane;
 
-import com.sms.database.DatabaseConnection;
-
+/**
+ * EmailService for sending result notifications using MailerSend API via HTTP.
+ * Handles email notifications to students when results are launched.
+ * 
+ * @version 1.0
+ * @since 2026-01-15
+ */
 public class EmailService {
     
-    // EmailJS configuration - you'll need to set these up in EmailJS dashboard
-    private static final String EMAILJS_SERVICE_ID = "service_wzfqoqi";
-    private static final String EMAILJS_TEMPLATE_ID = "template_8yadxkw";
-    private static final String EMAILJS_USER_ID = "qRvUql80LlODg7Dtu";
-    private static final String EMAILJS_API_URL = "https://api.emailjs.com/api/v1.0/email/send";
+    private static final String API_KEY = ConfigLoader.getMailerSendApiKey();
+    private static final String FROM_EMAIL = ConfigLoader.getMailerSendFromEmail();
+    private static final String FROM_NAME = ConfigLoader.getMailerSendFromName();
+    private static final String API_URL = "https://api.mailersend.com/v1/email";
     
     /**
-     * Send email notifications to students
+     * Send result notification emails to multiple students.
+     * 
+     * @param studentIds List of student IDs to send emails to
+     * @param subject Email subject
+     * @param messageBody Custom message from teacher
+     * @param launchName Name of the launched result
+     * @return true if all emails sent successfully, false otherwise
      */
-    private void sendEmailNotifications(int launchId, List<Integer> studentIds, ResultConfiguration config) {
-        if (!config.isSendEmailNotification()) {
-            System.out.println("Email notifications disabled in config");
-            return;
+    public static boolean sendResultNotifications(List<Integer> studentIds, String subject, 
+                                                  String messageBody, String launchName) {
+        
+        if (API_KEY == null || API_KEY.isEmpty()) {
+            System.err.println("⚠️ MailerSend API key not configured");
+            return false;
         }
         
-        try {
-            System.out.println("=== EMAIL NOTIFICATION DEBUG ===");
-            System.out.println("Launch ID: " + launchId);
-            System.out.println("Student IDs: " + studentIds);
-            System.out.println("Email subject: " + config.getEmailSubject());
-            
-            // Debug student emails first
-            getStudentEmails(studentIds);
-            
-            // Check if EmailJS is configured
-            if (EmailService.EMAILJS_SERVICE_ID.equals("your_service_id") || 
-                EmailService.EMAILJS_TEMPLATE_ID.equals("your_template_id") ||
-                EmailService.EMAILJS_USER_ID.equals("your_user_id")) {
+        System.out.println("📧 Sending emails to " + studentIds.size() + " students...");
+        
+        int successCount = 0;
+        int failCount = 0;
+        
+        for (Integer studentId : studentIds) {
+            try {
+                String studentEmail = getStudentEmail(studentId);
+                String studentName = getStudentName(studentId);
                 
-                System.out.println("EmailJS not configured - skipping email sending");
-                System.out.println("Please update EmailJS configuration in EmailService.java");
+                if (studentEmail == null || studentEmail.isEmpty()) {
+                    System.out.println("⚠️ No email for student ID " + studentId + ", skipping");
+                    failCount++;
+                    continue;
+                }
                 
-                // Mark as email sent = false
-                Connection conn = DatabaseConnection.getConnection();
-                String query = "UPDATE launched_results SET email_sent = false WHERE id = ?";
-                PreparedStatement ps = conn.prepareStatement(query);
-                ps.setInt(1, launchId);
-                ps.executeUpdate();
-                ps.close();
-                return;
+                // Set subject
+                String emailSubject = subject != null && !subject.isEmpty() ? 
+                                subject : "Your Results Have Been Published";
+                
+                // Create HTML and plain text content
+                String htmlContent = buildHtmlEmail(studentName, launchName, messageBody);
+                String plainContent = buildPlainEmail(studentName, launchName, messageBody);
+                
+                // Send email via HTTP API
+                boolean sent = sendEmailViaHttp(FROM_NAME, FROM_EMAIL, studentName, studentEmail, 
+                                               emailSubject, htmlContent, plainContent);
+                
+                if (sent) {
+                    System.out.println("✅ Email sent to " + studentName + " (" + studentEmail + ")");
+                    successCount++;
+                } else {
+                    System.err.println("❌ Failed to send email to " + studentEmail);
+                    failCount++;
+                }
+                
+                // Small delay to avoid rate limiting
+                Thread.sleep(100);
+                
+            } catch (Exception e) {
+                System.err.println("❌ Error for student " + studentId + ": " + e.getMessage());
+                failCount++;
             }
-            
-            // Send emails using EmailJS
-            boolean emailSuccess = EmailService.sendResultNotifications(
-                studentIds, 
-                config.getEmailSubject(), 
-                config.getEmailMessage(), 
-                config.getLaunchName()
-            );
-            
-            // Update email sent status
-            Connection conn = DatabaseConnection.getConnection();
-            String query = "UPDATE launched_results SET email_sent = ? WHERE id = ?";
-            PreparedStatement ps = conn.prepareStatement(query);
-            ps.setBoolean(1, emailSuccess);
-            ps.setInt(2, launchId);
-            ps.executeUpdate();
-            ps.close();
-            
-            System.out.println("Email notification process completed. Success: " + emailSuccess);
-            
-        } catch (Exception e) {
-            System.err.println("Error in email notification process: " + e.getMessage());
-            e.printStackTrace();
         }
+        
+        System.out.println("📊 Email Summary: " + successCount + " sent, " + failCount + " failed");
+        
+        // Consider successful if at least 50% sent
+        return successCount > 0 && (successCount >= studentIds.size() / 2);
     }
     
-    static boolean sendResultNotifications(List<Integer> studentIds, String emailSubject, String emailMessage,
-			String launchName) {
-		// TODO Auto-generated method stub
-		return false;
-	}
-
-	/**
-     * Send email to a single student using EmailJS
+    /**
+     * Send email via MailerSend HTTP API.
      */
-    private static boolean sendSingleEmail(StudentEmail studentEmail, String subject, 
-                                         String message, String launchName) {
+    private static boolean sendEmailViaHttp(String fromName, String fromEmail, 
+                                           String toName, String toEmail,
+                                           String subject, String htmlContent, String plainContent) {
         try {
-            // Create EmailJS payload
-            String jsonPayload = createEmailPayload(studentEmail, subject, message, launchName);
+            URL url = new URL(API_URL);
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             
-            // Send HTTP POST request to EmailJS
-            URL url = new URL(EMAILJS_API_URL);
-            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-            connection.setRequestMethod("POST");
-            connection.setRequestProperty("Content-Type", "application/json");
-            connection.setDoOutput(true);
+            // Set up connection
+            conn.setRequestMethod("POST");
+            conn.setRequestProperty("Content-Type", "application/json");
+            conn.setRequestProperty("Authorization", "Bearer " + API_KEY);
+            conn.setDoOutput(true);
             
-            // Write payload
-            try (OutputStream os = connection.getOutputStream()) {
-                byte[] input = jsonPayload.getBytes("utf-8");
-                os.write(input, 0, input.length);
+            // Build JSON payload
+            String jsonPayload = buildJsonPayload(fromName, fromEmail, toName, toEmail, 
+                                                 subject, htmlContent, plainContent);
+            
+            // Send request
+            try (OutputStreamWriter writer = new OutputStreamWriter(conn.getOutputStream(), StandardCharsets.UTF_8)) {
+                writer.write(jsonPayload);
+                writer.flush();
             }
             
             // Check response
-            int responseCode = connection.getResponseCode();
-            if (responseCode == 200) {
-                System.out.println("Email sent successfully to: " + studentEmail.email);
+            int responseCode = conn.getResponseCode();
+            
+            if (responseCode == 202 || responseCode == 200) {
                 return true;
             } else {
-                System.err.println("Failed to send email to " + studentEmail.email + 
-                                 ". Response code: " + responseCode);
+                System.err.println("Email API error: HTTP " + responseCode);
                 return false;
             }
             
         } catch (Exception e) {
-            System.err.println("Error sending email to " + studentEmail.email + ": " + e.getMessage());
+            System.err.println("HTTP email error: " + e.getMessage());
             return false;
         }
     }
     
     /**
-     * Create EmailJS JSON payload
+     * Build JSON payload for MailerSend API.
      */
-    private static String createEmailPayload(StudentEmail studentEmail, String subject, 
-            String message, String launchName) {
-// Customize the message for each student
-String personalizedMessage = message.replace("Dear Student", "Dear " + studentEmail.name);
-
-// Your portal URL - UPDATE THIS WITH YOUR ACTUAL PORTAL URL
-String portalUrl = "http://localhost:5000"; // Change this to your actual web portal URL
-
-// Create JSON payload for EmailJS
-StringBuilder json = new StringBuilder();
-json.append("{");
-json.append("\"service_id\":\"").append(EMAILJS_SERVICE_ID).append("\",");
-json.append("\"template_id\":\"").append(EMAILJS_TEMPLATE_ID).append("\",");
-json.append("\"user_id\":\"").append(EMAILJS_USER_ID).append("\",");
-json.append("\"template_params\":{");
-json.append("\"to_email\":\"").append(escapeJson(studentEmail.email)).append("\",");
-json.append("\"to_name\":\"").append(escapeJson(studentEmail.name)).append("\",");
-json.append("\"subject\":\"").append(escapeJson(subject)).append("\",");
-json.append("\"message\":\"").append(escapeJson(personalizedMessage)).append("\",");
-json.append("\"launch_name\":\"").append(escapeJson(launchName)).append("\",");
-json.append("\"student_section\":\"").append(escapeJson(studentEmail.section)).append("\",");
-json.append("\"portal_url\":\"").append(portalUrl).append("\",");
-json.append("\"launch_date\":\"").append(java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm"))).append("\"");
-json.append("}");
-json.append("}");
-
-return json.toString();
-}
-
-//Add this helper method to escape JSON strings
-private static String escapeJson(String text) {
-if (text == null) return "";
-return text.replace("\"", "\\\"")
-.replace("\n", "\\n")
-.replace("\r", "\\r")
-.replace("\t", "\\t");
-}
+    private static String buildJsonPayload(String fromName, String fromEmail,
+                                          String toName, String toEmail,
+                                          String subject, String htmlContent, String plainContent) {
+        StringBuilder json = new StringBuilder();
+        json.append("{");
+        json.append("\"from\":{");
+        json.append("\"email\":\"").append(escapeJson(fromEmail)).append("\",");
+        json.append("\"name\":\"").append(escapeJson(fromName)).append("\"");
+        json.append("},");
+        json.append("\"to\":[{");
+        json.append("\"email\":\"").append(escapeJson(toEmail)).append("\",");
+        json.append("\"name\":\"").append(escapeJson(toName)).append("\"");
+        json.append("}],");
+        json.append("\"subject\":\"").append(escapeJson(subject)).append("\",");
+        json.append("\"text\":\"").append(escapeJson(plainContent)).append("\",");
+        json.append("\"html\":\"").append(escapeJson(htmlContent)).append("\"");
+        json.append("}");
+        return json.toString();
+    }
     
     /**
-     * Get student emails from database
+     * Escape JSON special characters.
      */
- // In EmailService.java, replace the database connection part:
-    private static List<StudentEmail> getStudentEmails(List<Integer> studentIds) {
-        List<StudentEmail> emails = new ArrayList<>();
+    private static String escapeJson(String str) {
+        if (str == null) return "";
+        return str.replace("\\", "\\\\")
+                  .replace("\"", "\\\"")
+                  .replace("\n", "\\n")
+                  .replace("\r", "\\r")
+                  .replace("\t", "\\t");
+    }
+    
+    /**
+     * Send a single test email to verify configuration.
+     * 
+     * @param recipientEmail Email address to send test to
+     * @param recipientName Name of recipient
+     * @return true if sent successfully
+     */
+    public static boolean sendTestEmail(String recipientEmail, String recipientName) {
+        String html = "<html><body>" +
+                     "<h2>Test Email</h2>" +
+                     "<p>This is a test email from Academic Analyzer.</p>" +
+                     "<p>If you received this, your email configuration is working correctly!</p>" +
+                     "</body></html>";
         
+        String plain = "Test Email\n\n" +
+                      "This is a test email from Academic Analyzer.\n" +
+                      "If you received this, your email configuration is working correctly!";
+        
+        return sendEmailViaHttp(FROM_NAME, FROM_EMAIL, recipientName, recipientEmail,
+                               "Test Email from Academic Analyzer", html, plain);
+    }
+    
+    /**
+     * Get student email from database.
+     */
+    private static String getStudentEmail(int studentId) {
         try {
-            java.sql.Connection conn = com.sms.database.DatabaseConnection.getConnection();
+            Connection conn = DatabaseConnection.getConnection();
+            String query = "SELECT email FROM students WHERE id = ?";
+            PreparedStatement ps = conn.prepareStatement(query);
+            ps.setInt(1, studentId);
+            ResultSet rs = ps.executeQuery();
             
-            if (studentIds.isEmpty()) {
-                return emails;
-            }
-            
-            // Create placeholders for IN clause
-            String placeholders = String.join(",", java.util.Collections.nCopies(studentIds.size(), "?"));
-            
-            String query = "SELECT s.id, s.student_name, s.email, sec.section_name " +
-                          "FROM students s " +
-                          "JOIN sections sec ON s.section_id = sec.id " +
-                          "WHERE s.id IN (" + placeholders + ") AND s.email IS NOT NULL AND s.email != ''";
-            
-            java.sql.PreparedStatement ps = conn.prepareStatement(query);
-            for (int i = 0; i < studentIds.size(); i++) {
-                ps.setInt(i + 1, studentIds.get(i));
-            }
-            
-            java.sql.ResultSet rs = ps.executeQuery();
-            
-            while (rs.next()) {
-                StudentEmail studentEmail = new StudentEmail();
-                studentEmail.id = rs.getInt("id");
-                studentEmail.name = rs.getString("student_name");
-                studentEmail.email = rs.getString("email");
-                studentEmail.section = rs.getString("section_name");
-                emails.add(studentEmail);
+            String email = null;
+            if (rs.next()) {
+                email = rs.getString("email");
             }
             
             rs.close();
             ps.close();
+            return email;
             
         } catch (Exception e) {
-            System.err.println("Error getting student emails: " + e.getMessage());
-            e.printStackTrace();
+            System.err.println("Error getting student email: " + e.getMessage());
+            return null;
         }
-        
-        return emails;
     }
     
     /**
-     * Test email configuration
+     * Get student name from database.
      */
-    public static boolean testEmailConfiguration() {
+    private static String getStudentName(int studentId) {
         try {
-            // Send a test email to verify configuration
-            StudentEmail testEmail = new StudentEmail();
-            testEmail.name = "Test User";
-            testEmail.email = "test@example.com"; // Replace with your test email
-            testEmail.section = "Test Section";
+            Connection conn = DatabaseConnection.getConnection();
+            String query = "SELECT student_name FROM students WHERE id = ?";
+            PreparedStatement ps = conn.prepareStatement(query);
+            ps.setInt(1, studentId);
+            ResultSet rs = ps.executeQuery();
             
-            return sendSingleEmail(testEmail, "Test Email", 
-                "This is a test email from the Result Launcher system.", "Test Launch");
-                
+            String name = "Student";
+            if (rs.next()) {
+                name = rs.getString("student_name");
+            }
+            
+            rs.close();
+            ps.close();
+            return name;
+            
         } catch (Exception e) {
-            System.err.println("Email configuration test failed: " + e.getMessage());
-            return false;
+            System.err.println("Error getting student name: " + e.getMessage());
+            return "Student";
         }
     }
     
-    // Helper class for student email data
-    private static class StudentEmail {
-        int id;
-        String name;
-        String email;
-        String section;
+    /**
+     * Build HTML email content.
+     */
+    private static String buildHtmlEmail(String studentName, String launchName, String customMessage) {
+        StringBuilder html = new StringBuilder();
+        
+        html.append("<!DOCTYPE html>");
+        html.append("<html>");
+        html.append("<head>");
+        html.append("<style>");
+        html.append("body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; }");
+        html.append(".container { max-width: 600px; margin: 0 auto; padding: 20px; }");
+        html.append(".header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }");
+        html.append(".content { background: #f8f9fa; padding: 30px; border-radius: 0 0 10px 10px; }");
+        html.append(".button { display: inline-block; padding: 12px 30px; background: #667eea; color: white; text-decoration: none; border-radius: 5px; margin: 20px 0; }");
+        html.append(".footer { text-align: center; margin-top: 20px; color: #6c757d; font-size: 12px; }");
+        html.append("</style>");
+        html.append("</head>");
+        html.append("<body>");
+        html.append("<div class='container'>");
+        html.append("<div class='header'>");
+        html.append("<h1>📊 Results Published</h1>");
+        html.append("</div>");
+        html.append("<div class='content'>");
+        html.append("<p>Dear <strong>").append(studentName).append("</strong>,</p>");
+        html.append("<p>Your results for <strong>").append(launchName).append("</strong> have been published and are now available for viewing.</p>");
+        
+        if (customMessage != null && !customMessage.isEmpty()) {
+            html.append("<div style='background: white; padding: 15px; border-left: 4px solid #667eea; margin: 20px 0;'>");
+            html.append("<p><strong>Message from your teacher:</strong></p>");
+            html.append("<p>").append(customMessage.replace("\n", "<br>")).append("</p>");
+            html.append("</div>");
+        }
+        
+        html.append("<p>To view your results, please log in to the student portal:</p>");
+        html.append("<a href='#' class='button'>View My Results</a>");
+        html.append("<p style='color: #6c757d; font-size: 14px;'>If the button doesn't work, copy and paste this link into your browser:<br>");
+        html.append("<code style='background: #e9ecef; padding: 5px; display: block; margin-top: 10px;'>https://your-portal-url.com/student/results</code></p>");
+        html.append("</div>");
+        html.append("<div class='footer'>");
+        html.append("<p>This is an automated email from Academic Analyzer. Please do not reply to this email.</p>");
+        html.append("<p>&copy; 2026 Academic Analyzer. All rights reserved.</p>");
+        html.append("</div>");
+        html.append("</div>");
+        html.append("</body>");
+        html.append("</html>");
+        
+        return html.toString();
+    }
+    
+    /**
+     * Build plain text email content.
+     */
+    private static String buildPlainEmail(String studentName, String launchName, String customMessage) {
+        StringBuilder plain = new StringBuilder();
+        
+        plain.append("RESULTS PUBLISHED\n");
+        plain.append("==================\n\n");
+        plain.append("Dear ").append(studentName).append(",\n\n");
+        plain.append("Your results for '").append(launchName).append("' have been published and are now available for viewing.\n\n");
+        
+        if (customMessage != null && !customMessage.isEmpty()) {
+            plain.append("MESSAGE FROM YOUR TEACHER:\n");
+            plain.append("---------------------------\n");
+            plain.append(customMessage).append("\n\n");
+        }
+        
+        plain.append("To view your results, please log in to the student portal at:\n");
+        plain.append("https://your-portal-url.com/student/results\n\n");
+        plain.append("--\n");
+        plain.append("This is an automated email from Academic Analyzer.\n");
+        plain.append("Please do not reply to this email.\n\n");
+        plain.append("© 2026 Academic Analyzer. All rights reserved.\n");
+        
+        return plain.toString();
+    }
+    
+    /**
+     * Validate MailerSend configuration.
+     * 
+     * @return true if configuration is valid
+     */
+    public static boolean isConfigured() {
+        return API_KEY != null && !API_KEY.isEmpty() && 
+               FROM_EMAIL != null && !FROM_EMAIL.isEmpty();
+    }
+    
+    /**
+     * Get configuration status message.
+     */
+    public static String getConfigStatus() {
+        if (!isConfigured()) {
+            return "❌ MailerSend not configured. Please add MAILERSEND_API_KEY to .env file";
+        }
+        return "✅ MailerSend configured correctly";
     }
 }

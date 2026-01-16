@@ -140,6 +140,7 @@ public class AnalyzerDAO {
                     rs.getString("roll_number"),
                     marks
                 );
+                student.setId(studentId); // Set the student ID
                 student.setSection(rs.getString("section_name"));
                 students.add(student);
             }
@@ -154,16 +155,16 @@ public class AnalyzerDAO {
     
     // Get marks for a student - returns nested map: subject -> exam type -> marks
     // Only fetches subjects that are linked to the student's section
-    // UPDATED: Uses student_marks table with exam_type_id FK
+    // UPDATED: Uses entered_exam_marks table with exam_type_id FK
     private Map<String, Map<String, Integer>> getStudentMarks(int studentId, int sectionId) {
         Map<String, Map<String, Integer>> marks = new HashMap<>();
         try {
             Connection conn = DatabaseConnection.getConnection();
             
-            // Simplified query: Just get marks from student_marks table
-            // student_marks already has the correct subject_id and exam_type_id
+            // Simplified query: Just get marks from entered_exam_marks table
+            // entered_exam_marks already has the correct subject_id and exam_type_id
             String query = "SELECT sub.subject_name, et.exam_name, sm.marks_obtained " +
-                          "FROM student_marks sm " +
+                          "FROM entered_exam_marks sm " +
                           "JOIN subjects sub ON sm.subject_id = sub.id " +
                           "JOIN exam_types et ON sm.exam_type_id = et.id " +
                           "WHERE sm.student_id = ? " +
@@ -293,7 +294,7 @@ public class AnalyzerDAO {
                 // Get marks for ALL students for this subject in ONE query
                 StringBuilder marksQuery = new StringBuilder(
                     "SELECT sm.student_id, et.exam_name, sm.marks_obtained " +
-                    "FROM student_marks sm " +
+                    "FROM entered_exam_marks sm " +
                     "JOIN exam_types et ON sm.exam_type_id = et.id " +
                     "WHERE sm.subject_id = ? AND sm.student_id IN ("
                 );
@@ -504,7 +505,7 @@ public class AnalyzerDAO {
                 "    AVG(sm.marks_obtained) as avg_marks " +
                 "FROM section_subjects ss " +
                 "INNER JOIN subjects sub ON ss.subject_id = sub.id " +
-                "LEFT JOIN student_marks sm ON sm.subject_id = sub.id " +
+                "LEFT JOIN entered_exam_marks sm ON sm.subject_id = sub.id " +
                 "LEFT JOIN exam_types et ON sm.exam_type_id = et.id " +
                 "LEFT JOIN students s ON sm.student_id = s.id AND s.section_id = ss.section_id AND s.created_by = ? " +
                 "WHERE ss.section_id = ? " + filterClause.toString() +
@@ -861,48 +862,110 @@ public class AnalyzerDAO {
         
         try {
             Connection conn = DatabaseConnection.getConnection();
-            StringBuilder query = new StringBuilder();
-            query.append("SELECT mc.id, mc.component_name, mc.component_type, mc.actual_max_marks, ")
-                 .append("mc.scaled_to_marks, mc.component_group, mc.sequence_order, ")
-                 .append("cg.group_name, cg.selection_type, cg.selection_count ")
-                 .append("FROM marking_components mc ")
-                 .append("LEFT JOIN component_groups cg ON mc.group_id = cg.id ")
-                 .append("JOIN marking_schemes ms ON mc.scheme_id = ms.id ")
-                 .append("WHERE ms.section_id = ? AND ms.subject_id = ? ");
             
-            if (!"all".equals(componentType)) {
-                query.append("AND mc.component_type = ? ");
+            // First check which marking system this section uses
+            String checkQuery = "SELECT marking_system FROM sections WHERE id = ?";
+            PreparedStatement checkPs = conn.prepareStatement(checkQuery);
+            checkPs.setInt(1, sectionId);
+            ResultSet checkRs = checkPs.executeQuery();
+            
+            String markingSystem = "old"; // default
+            if (checkRs.next()) {
+                markingSystem = checkRs.getString("marking_system");
             }
+            checkRs.close();
+            checkPs.close();
             
-            query.append("ORDER BY mc.sequence_order, mc.component_name");
-            
-            PreparedStatement ps = conn.prepareStatement(query.toString());
-            ps.setInt(1, sectionId);
-            ps.setInt(2, subjectId);
-            
-            if (!"all".equals(componentType)) {
-                ps.setString(3, componentType);
-            }
-            
-            ResultSet rs = ps.executeQuery();
-            
-            while (rs.next()) {
-                ComponentInfo comp = new ComponentInfo();
-                comp.id = rs.getInt("id");
-                comp.name = rs.getString("component_name");
-                comp.type = rs.getString("component_type");
-                comp.maxMarks = rs.getInt("actual_max_marks");
-                comp.scaledMarks = rs.getInt("scaled_to_marks");
-                comp.groupName = rs.getString("component_group");
-                comp.sequenceOrder = rs.getInt("sequence_order");
-                comp.groupSelectionType = rs.getString("selection_type");
-                comp.groupSelectionCount = rs.getInt("selection_count");
+            // If flexible system, get components from marking_components
+            if ("flexible".equals(markingSystem)) {
+                StringBuilder query = new StringBuilder();
+                query.append("SELECT mc.id, mc.component_name, mc.component_type, mc.actual_max_marks, ")
+                     .append("mc.scaled_to_marks, mc.component_group, mc.sequence_order, ")
+                     .append("cg.group_name, cg.selection_type, cg.selection_count ")
+                     .append("FROM marking_components mc ")
+                     .append("LEFT JOIN component_groups cg ON mc.group_id = cg.id ")
+                     .append("JOIN marking_schemes ms ON mc.scheme_id = ms.id ")
+                     .append("WHERE ms.section_id = ? AND ms.subject_id = ? ");
                 
-                components.add(comp);
+                if (!"all".equals(componentType)) {
+                    query.append("AND mc.component_type = ? ");
+                }
+                
+                query.append("ORDER BY mc.sequence_order, mc.component_name");
+                
+                PreparedStatement ps = conn.prepareStatement(query.toString());
+                ps.setInt(1, sectionId);
+                ps.setInt(2, subjectId);
+                
+                if (!"all".equals(componentType)) {
+                    ps.setString(3, componentType);
+                }
+                
+                ResultSet rs = ps.executeQuery();
+                
+                while (rs.next()) {
+                    ComponentInfo comp = new ComponentInfo();
+                    comp.id = rs.getInt("id");
+                    comp.name = rs.getString("component_name");
+                    comp.type = rs.getString("component_type");
+                    comp.maxMarks = rs.getInt("actual_max_marks");
+                    comp.scaledMarks = rs.getInt("scaled_to_marks");
+                    comp.groupName = rs.getString("component_group");
+                    comp.sequenceOrder = rs.getInt("sequence_order");
+                    comp.groupSelectionType = rs.getString("selection_type");
+                    comp.groupSelectionCount = rs.getInt("selection_count");
+                    
+                    components.add(comp);
+                }
+                
+                rs.close();
+                ps.close();
+            } else {
+                // Old system - get from exam_types (simple structure)
+                // Join with entered_exam_marks to get only exam types used for this specific subject
+                StringBuilder query = new StringBuilder();
+                query.append("SELECT DISTINCT et.id, et.exam_name as component_name, 'exam' as component_type, ")
+                     .append("et.max_marks as actual_max_marks, et.weightage as scaled_to_marks, ")
+                     .append("NULL as component_group, et.id as sequence_order, ")
+                     .append("NULL as group_name, NULL as selection_type, 0 as selection_count ")
+                     .append("FROM exam_types et ")
+                     .append("JOIN entered_exam_marks eem ON et.id = eem.exam_type_id ")
+                     .append("WHERE et.section_id = ? AND eem.subject_id = ? ");
+                
+                if (!"all".equals(componentType)) {
+                    query.append("AND 'exam' = ? ");
+                }
+                
+                query.append("ORDER BY et.id");
+                
+                PreparedStatement ps = conn.prepareStatement(query.toString());
+                ps.setInt(1, sectionId);
+                ps.setInt(2, subjectId);
+                
+                if (!"all".equals(componentType)) {
+                    ps.setString(3, componentType);
+                }
+                
+                ResultSet rs = ps.executeQuery();
+                
+                while (rs.next()) {
+                    ComponentInfo comp = new ComponentInfo();
+                    comp.id = rs.getInt("id");
+                    comp.name = rs.getString("component_name");
+                    comp.type = rs.getString("component_type");
+                    comp.maxMarks = rs.getInt("actual_max_marks");
+                    comp.scaledMarks = rs.getInt("scaled_to_marks");
+                    comp.groupName = rs.getString("component_group");
+                    comp.sequenceOrder = rs.getInt("sequence_order");
+                    comp.groupSelectionType = rs.getString("selection_type");
+                    comp.groupSelectionCount = rs.getInt("selection_count");
+                    
+                    components.add(comp);
+                }
+                
+                rs.close();
+                ps.close();
             }
-            
-            rs.close();
-            ps.close();
         } catch (SQLException e) {
             e.printStackTrace();
         }
@@ -919,10 +982,12 @@ public class AnalyzerDAO {
             Connection conn = DatabaseConnection.getConnection();
             String placeholders = String.join(",", Collections.nCopies(componentIds.size(), "?"));
             
+            // Query student_component_marks table (with LEFT JOIN to handle missing components)
             String query = "SELECT scm.component_id, scm.marks_obtained, scm.scaled_marks, " +
-                          "scm.is_counted, mc.component_name, mc.actual_max_marks, mc.scaled_to_marks " +
+                          "scm.is_counted, et.exam_name as component_name, et.max_marks as actual_max_marks, " +
+                          "et.max_marks as scaled_to_marks " +
                           "FROM student_component_marks scm " +
-                          "JOIN marking_components mc ON scm.component_id = mc.id " +
+                          "LEFT JOIN exam_types et ON scm.component_id = et.id " +
                           "WHERE scm.student_id = ? AND scm.component_id IN (" + placeholders + ")";
             
             PreparedStatement ps = conn.prepareStatement(query);
@@ -949,6 +1014,7 @@ public class AnalyzerDAO {
             
             rs.close();
             ps.close();
+            
         } catch (SQLException e) {
             e.printStackTrace();
         }
@@ -961,10 +1027,12 @@ public class AnalyzerDAO {
         
         try {
             Connection conn = DatabaseConnection.getConnection();
+            
+            // First try the new system (section_subjects)
             String query = "SELECT DISTINCT s.id, s.subject_name " +
                           "FROM subjects s " +
-                          "JOIN marking_schemes ms ON s.id = ms.subject_id " +
-                          "WHERE ms.section_id = ? " +
+                          "JOIN section_subjects ss ON s.id = ss.subject_id " +
+                          "WHERE ss.section_id = ? " +
                           "ORDER BY s.subject_name";
             
             PreparedStatement ps = conn.prepareStatement(query);
@@ -980,6 +1048,29 @@ public class AnalyzerDAO {
             
             rs.close();
             ps.close();
+            
+            // If no subjects found, try the old system (marking_schemes)
+            if (subjects.isEmpty()) {
+                query = "SELECT DISTINCT s.id, s.subject_name " +
+                       "FROM subjects s " +
+                       "JOIN marking_schemes ms ON s.id = ms.subject_id " +
+                       "WHERE ms.section_id = ? " +
+                       "ORDER BY s.subject_name";
+                
+                ps = conn.prepareStatement(query);
+                ps.setInt(1, sectionId);
+                rs = ps.executeQuery();
+                
+                while (rs.next()) {
+                    SubjectInfo subject = new SubjectInfo();
+                    subject.id = rs.getInt("id");
+                    subject.name = rs.getString("subject_name");
+                    subjects.add(subject);
+                }
+                
+                rs.close();
+                ps.close();
+            }
         } catch (SQLException e) {
             e.printStackTrace();
         }
@@ -1175,7 +1266,7 @@ public class AnalyzerDAO {
             
             // Get student's marks for this subject
             String marksQuery = "SELECT et.exam_name, sm.marks_obtained " +
-                              "FROM student_marks sm " +
+                              "FROM entered_exam_marks sm " +
                               "JOIN exam_types et ON sm.exam_type_id = et.id " +
                               "WHERE sm.student_id = ? AND sm.subject_id = ?";
             PreparedStatement psMarks = conn.prepareStatement(marksQuery);
@@ -1452,7 +1543,7 @@ public class AnalyzerDAO {
         return distribution;
     }
     
-    private String getGradeFromPercentage(double percentage) {
+    public String getGradeFromPercentage(double percentage) {
         if (percentage >= 90) return "A+";
         if (percentage >= 80) return "A";
         if (percentage >= 70) return "B+";
@@ -1460,6 +1551,45 @@ public class AnalyzerDAO {
         if (percentage >= 50) return "C";
         if (percentage >= 40) return "D";
         return "F";
+    }
+    
+    /**
+     * Public method to get student marks for result launcher
+     */
+    public Map<String, Map<String, Integer>> getStudentMarksDetailed(int studentId, int sectionId) {
+        return getStudentMarks(studentId, sectionId);
+    }
+    
+    /**
+     * Get exam type configuration details
+     */
+    public ExamTypeConfig getExamTypeConfig(int sectionId, String examName) {
+        try {
+            Connection conn = DatabaseConnection.getConnection();
+            String query = "SELECT id, exam_name, max_marks, weightage, passing_marks " +
+                          "FROM exam_types WHERE section_id = ? AND exam_name = ?";
+            PreparedStatement ps = conn.prepareStatement(query);
+            ps.setInt(1, sectionId);
+            ps.setString(2, examName);
+            ResultSet rs = ps.executeQuery();
+            
+            ExamTypeConfig config = null;
+            if (rs.next()) {
+                config = new ExamTypeConfig(
+                    rs.getInt("id"),
+                    rs.getString("exam_name"),
+                    rs.getInt("max_marks"),
+                    rs.getInt("weightage"),
+                    rs.getInt("passing_marks")
+                );
+            }
+            rs.close();
+            ps.close();
+            return config;
+        } catch (SQLException e) {
+            e.printStackTrace();
+            return null;
+        }
     }
     
     // At-Risk Students Data
@@ -1665,7 +1795,7 @@ public class AnalyzerDAO {
                        "    SUM(sm.marks_obtained) AS subject_marks, " +
                        "    ss.max_marks AS subject_max_marks " +
                        "FROM students s " +
-                       "INNER JOIN student_marks sm ON sm.student_id = s.id " +
+                       "INNER JOIN entered_exam_marks sm ON sm.student_id = s.id " +
                        "INNER JOIN exam_types et ON sm.exam_type_id = et.id " +
                        "INNER JOIN subjects sub ON sm.subject_id = sub.id " +
                        "INNER JOIN section_subjects ss ON ss.subject_id = sub.id AND ss.section_id = s.section_id " +
@@ -1681,7 +1811,7 @@ public class AnalyzerDAO {
                        "FROM students s " +
                        "CROSS JOIN section_subjects ss ON ss.section_id = s.section_id " +
                        "JOIN subjects sub ON ss.subject_id = sub.id " +
-                       "LEFT JOIN student_marks sm ON sm.student_id = s.id AND sm.subject_id = ss.subject_id " +
+                       "LEFT JOIN entered_exam_marks sm ON sm.student_id = s.id AND sm.subject_id = ss.subject_id " +
                        "WHERE s.section_id = ? AND s.roll_number = ? " +
                        "GROUP BY sub.subject_name, ss.max_marks " +
                        "HAVING (COALESCE(SUM(sm.marks_obtained), 0) * 100.0 / ss.max_marks) < 50";
@@ -1867,8 +1997,15 @@ public class AnalyzerDAO {
         public String subjectName;
         public int maxMarks;
         public List<String> examTypes = new ArrayList<>();
-        public Map<String, Integer> examTypeMaxMarks = new HashMap<>();
-        public Map<String, Integer> examTypeWeightage = new HashMap<>();
+        public Map<String, Integer> examTypeMaxMarks = new LinkedHashMap<>();
+        public Map<String, Integer> examTypeWeightage = new LinkedHashMap<>();
+        
+        // Helper method to add exam type only if not already present
+        public void addExamType(String examType) {
+            if (!examTypes.contains(examType)) {
+                examTypes.add(examType);
+            }
+        }
     }
     
     public static class StudentRankingDetail {
@@ -1965,12 +2102,12 @@ public class AnalyzerDAO {
                 
                 System.out.println("@@@ QUERY COMPLETE: hasComponents=" + hasComponents + ", found " + examTypeMaxMarks.size() + " components @@@");
                 
-                // If no components found in new system, get from old system (student_marks)
+                // If no components found in new system, get from old system (entered_exam_marks)
                 if (!hasComponents) {
                     System.out.println("@@@ NO COMPONENTS FOUND - Falling back to old system @@@");
                     String examTypeQuery1 = 
                         "SELECT DISTINCT et.exam_name, et.max_marks " +
-                        "FROM student_marks sm " +
+                        "FROM entered_exam_marks sm " +
                         "JOIN exam_types et ON sm.exam_type_id = et.id " +
                         "JOIN students s ON sm.student_id = s.id " +
                         "WHERE sm.subject_id = ? AND s.section_id = ? " +
@@ -2022,8 +2159,10 @@ public class AnalyzerDAO {
                     ps4.close();
                 }
                 
-                // Add exam types to subject info
-                subInfo.examTypes.addAll(examTypes);
+                // Add exam types to subject info (prevent duplicates)
+                for (String examType : examTypes) {
+                    subInfo.addExamType(examType);
+                }
                 
                 // If we have actual max marks from components, use them
                 if (!examTypeMaxMarks.isEmpty()) {
@@ -2167,5 +2306,60 @@ public class AnalyzerDAO {
         }
         
         return data;
+    }
+    
+    /**
+     * Fetch marks from entered_exam_marks table (for result launch).
+     * This is used when launching results - reads manual entry marks.
+     * 
+     * @param studentId Student ID
+     * @param examTypeIds List of exam_type IDs (from exam_types table)
+     * @return Map of exam_type_id to StudentComponentMark (reusing same structure)
+     */
+    public Map<Integer, StudentComponentMark> getStudentExamMarks(int studentId, List<Integer> examTypeIds) {
+        Map<Integer, StudentComponentMark> marks = new HashMap<>();
+        
+        if (examTypeIds.isEmpty()) return marks;
+        
+        try {
+            Connection conn = DatabaseConnection.getConnection();
+            String placeholders = String.join(",", Collections.nCopies(examTypeIds.size(), "?"));
+            
+            // Read from entered_exam_marks table with exam_type_id
+            String query = "SELECT sm.exam_type_id, sm.marks_obtained, " +
+                          "et.exam_name, et.max_marks, et.weightage " +
+                          "FROM entered_exam_marks sm " +
+                          "JOIN exam_types et ON sm.exam_type_id = et.id " +
+                          "WHERE sm.student_id = ? AND sm.exam_type_id IN (" + placeholders + ")";
+            
+            PreparedStatement ps = conn.prepareStatement(query);
+            ps.setInt(1, studentId);
+            
+            for (int i = 0; i < examTypeIds.size(); i++) {
+                ps.setInt(i + 2, examTypeIds.get(i));
+            }
+            
+            ResultSet rs = ps.executeQuery();
+            
+            while (rs.next()) {
+                StudentComponentMark mark = new StudentComponentMark();
+                mark.componentId = rs.getInt("exam_type_id");
+                mark.marksObtained = rs.getDouble("marks_obtained");
+                mark.scaledMarks = rs.getDouble("marks_obtained"); // No scaling in simple system
+                mark.isCounted = true; // All marks are counted
+                mark.componentName = rs.getString("exam_name");
+                mark.maxMarks = rs.getInt("max_marks");
+                mark.scaledToMarks = rs.getInt("max_marks");
+                
+                marks.put(mark.componentId, mark);
+            }
+            
+            rs.close();
+            ps.close();
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        
+        return marks;
     }
 }

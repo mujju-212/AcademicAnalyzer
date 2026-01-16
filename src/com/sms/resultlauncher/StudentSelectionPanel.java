@@ -20,17 +20,20 @@ public class StudentSelectionPanel extends JPanel {
     private JScrollPane scrollPane;
     private JCheckBox selectAllCheckbox;
     private JLabel selectionCountLabel;
+    private JTextField searchField;
     private Map<Integer, JCheckBox> studentCheckboxes;
     private List<Student> currentStudents;
+    private List<Student> filteredStudents;
     
     public StudentSelectionPanel(ResultLauncher parent) {
         this.parentLauncher = parent;
         this.studentCheckboxes = new HashMap<>();
         this.currentStudents = new ArrayList<>();
+        this.filteredStudents = new ArrayList<>();
         
-        setPreferredSize(new Dimension(380, 220));
-        setMaximumSize(new Dimension(380, 220));
-        setMinimumSize(new Dimension(380, 220));
+        setPreferredSize(new Dimension(380, 280)); // Increased height
+        setMaximumSize(new Dimension(380, 280));
+        setMinimumSize(new Dimension(380, 280));
         
         initializeUI();
     }
@@ -43,7 +46,16 @@ public class StudentSelectionPanel extends JPanel {
         cardPanel.setLayout(new BorderLayout());
         
         JPanel headerPanel = createHeaderPanel();
-        headerPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 15, 0));
+        headerPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 10, 0));
+        
+        JPanel searchPanel = createSearchPanel();
+        searchPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 10, 0));
+        
+        JPanel topPanel = new JPanel();
+        topPanel.setLayout(new BoxLayout(topPanel, BoxLayout.Y_AXIS));
+        topPanel.setOpaque(false);
+        topPanel.add(headerPanel);
+        topPanel.add(searchPanel);
         
         studentsPanel = new JPanel();
         studentsPanel.setLayout(new BoxLayout(studentsPanel, BoxLayout.Y_AXIS));
@@ -54,13 +66,13 @@ public class StudentSelectionPanel extends JPanel {
         scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
         scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
         scrollPane.setBorder(BorderFactory.createEmptyBorder());
-        scrollPane.setPreferredSize(new Dimension(0, 130));
+        scrollPane.setPreferredSize(new Dimension(0, 160)); // Increased from 130
         scrollPane.getViewport().setBackground(ResultLauncherUtils.CARD_COLOR);
         
         JPanel footerPanel = createFooterPanel();
-        footerPanel.setBorder(BorderFactory.createEmptyBorder(15, 0, 0, 0));
+        footerPanel.setBorder(BorderFactory.createEmptyBorder(10, 0, 0, 0));
         
-        cardPanel.add(headerPanel, BorderLayout.NORTH);
+        cardPanel.add(topPanel, BorderLayout.NORTH);
         cardPanel.add(scrollPane, BorderLayout.CENTER);
         cardPanel.add(footerPanel, BorderLayout.SOUTH);
         
@@ -73,18 +85,49 @@ public class StudentSelectionPanel extends JPanel {
         JPanel panel = new JPanel(new BorderLayout());
         panel.setOpaque(false);
         
+        JPanel leftPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+        leftPanel.setOpaque(false);
+        
         JLabel titleLabel = new JLabel("👥 Select Students");
         titleLabel.setFont(new Font("SansSerif", Font.BOLD, 16));
         titleLabel.setForeground(ResultLauncherUtils.PRIMARY_COLOR);
         
+        leftPanel.add(titleLabel);
+        
         selectAllCheckbox = new JCheckBox("Select All");
         selectAllCheckbox.setFont(new Font("SansSerif", Font.BOLD, 12));
         selectAllCheckbox.setOpaque(false);
+        selectAllCheckbox.setSelected(false); // Initialize to unchecked
         selectAllCheckbox.setEnabled(false);
-        selectAllCheckbox.addActionListener(e -> toggleSelectAll());
+        selectAllCheckbox.addActionListener(e -> {
+            toggleSelectAll();
+        });
         
-        panel.add(titleLabel, BorderLayout.WEST);
+        panel.add(leftPanel, BorderLayout.WEST);
         panel.add(selectAllCheckbox, BorderLayout.EAST);
+        
+        return panel;
+    }
+    
+    private JPanel createSearchPanel() {
+        JPanel panel = new JPanel(new BorderLayout(10, 0));
+        panel.setOpaque(false);
+        
+        JLabel searchLabel = new JLabel("\ud83d\udd0d");
+        searchLabel.setFont(new Font("SansSerif", Font.PLAIN, 14));
+        
+        searchField = new JTextField();
+        searchField.setFont(new Font("SansSerif", Font.PLAIN, 12));
+        searchField.putClientProperty("JTextField.placeholderText", "Search by name or roll number...");
+        searchField.setEnabled(false);
+        searchField.addKeyListener(new java.awt.event.KeyAdapter() {
+            public void keyReleased(java.awt.event.KeyEvent evt) {
+                filterStudents();
+            }
+        });
+        
+        panel.add(searchLabel, BorderLayout.WEST);
+        panel.add(searchField, BorderLayout.CENTER);
         
         return panel;
     }
@@ -145,6 +188,9 @@ public class StudentSelectionPanel extends JPanel {
             protected void done() {
                 try {
                     currentStudents = get();
+                    filteredStudents = new ArrayList<>(currentStudents);
+                    searchField.setEnabled(true);
+                    searchField.setText("");
                     updateStudentsList();
                     
                 } catch (Exception e) {
@@ -161,8 +207,14 @@ public class StudentSelectionPanel extends JPanel {
         studentsPanel.removeAll();
         studentCheckboxes.clear();
         
-        if (currentStudents.isEmpty()) {
-            JLabel noStudentsLabel = new JLabel("No students found in this section");
+        List<Student> studentsToDisplay = filteredStudents.isEmpty() ? currentStudents : filteredStudents;
+        
+        if (studentsToDisplay.isEmpty()) {
+            String message = searchField != null && !searchField.getText().trim().isEmpty() 
+                ? "No students match your search" 
+                : "No students found in this section";
+            
+            JLabel noStudentsLabel = new JLabel(message);
             noStudentsLabel.setFont(new Font("SansSerif", Font.ITALIC, 14));
             noStudentsLabel.setForeground(ResultLauncherUtils.TEXT_SECONDARY);
             noStudentsLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
@@ -171,15 +223,16 @@ public class StudentSelectionPanel extends JPanel {
             studentsPanel.add(noStudentsLabel);
             studentsPanel.add(Box.createVerticalGlue());
         } else {
-            for (Student student : currentStudents) {
+            for (Student student : studentsToDisplay) {
                 JPanel studentPanel = createStudentPanel(student);
                 studentsPanel.add(studentPanel);
                 studentsPanel.add(Box.createVerticalStrut(5));
             }
         }
         
-        selectAllCheckbox.setEnabled(!currentStudents.isEmpty());
+        selectAllCheckbox.setEnabled(!studentsToDisplay.isEmpty());
         updateSelectionCount();
+        updateSelectAllState();
         
         revalidate();
         repaint();
@@ -241,11 +294,39 @@ public class StudentSelectionPanel extends JPanel {
         repaint();
     }
     
+    private void filterStudents() {
+        String searchText = searchField.getText().trim().toLowerCase();
+        
+        if (searchText.isEmpty()) {
+            filteredStudents = new ArrayList<>(currentStudents);
+        } else {
+            filteredStudents = new ArrayList<>();
+            for (Student student : currentStudents) {
+                String name = student.getName().toLowerCase();
+                String roll = student.getRollNumber().toLowerCase();
+                if (name.contains(searchText) || roll.contains(searchText)) {
+                    filteredStudents.add(student);
+                }
+            }
+        }
+        
+        updateStudentsList();
+        selectAllCheckbox.setEnabled(!filteredStudents.isEmpty());
+        updateSelectionCount();
+    }
+    
     private void toggleSelectAll() {
         boolean selectAll = selectAllCheckbox.isSelected();
+        System.out.println("=== TOGGLE SELECT ALL: " + selectAll + " ===");
+        System.out.println("Checkboxes in map: " + studentCheckboxes.size());
+        
+        int changed = 0;
         for (JCheckBox checkbox : studentCheckboxes.values()) {
             checkbox.setSelected(selectAll);
+            changed++;
         }
+        
+        System.out.println("Changed " + changed + " checkboxes");
         updateSelectionCount();
         notifySelectionChanged();
     }
@@ -258,14 +339,21 @@ public class StudentSelectionPanel extends JPanel {
             }
         }
         
-        if (currentStudents.isEmpty()) {
+        int displayedCount = studentCheckboxes.size();
+        
+        if (displayedCount == 0) {
             selectionCountLabel.setText("No students available");
         } else {
-            selectionCountLabel.setText(selectedCount + " of " + currentStudents.size() + " students selected");
+            selectionCountLabel.setText(selectedCount + " of " + displayedCount + " students selected");
         }
     }
     
     private void updateSelectAllState() {
+        if (studentCheckboxes.isEmpty()) {
+            selectAllCheckbox.setSelected(false);
+            return;
+        }
+        
         int totalStudents = studentCheckboxes.size();
         int selectedStudents = 0;
         
@@ -275,12 +363,18 @@ public class StudentSelectionPanel extends JPanel {
             }
         }
         
-        if (selectedStudents == 0) {
-            selectAllCheckbox.setSelected(false);
-        } else if (selectedStudents == totalStudents) {
-            selectAllCheckbox.setSelected(true);
-        } else {
-            selectAllCheckbox.setSelected(false);
+        // Remove listener temporarily to avoid triggering toggleSelectAll
+        ActionListener[] listeners = selectAllCheckbox.getActionListeners();
+        for (ActionListener listener : listeners) {
+            selectAllCheckbox.removeActionListener(listener);
+        }
+        
+        // Update state: only check if ALL displayed students are selected
+        selectAllCheckbox.setSelected(selectedStudents == totalStudents && totalStudents > 0);
+        
+        // Re-add listeners
+        for (ActionListener listener : listeners) {
+            selectAllCheckbox.addActionListener(listener);
         }
     }
     
@@ -305,4 +399,34 @@ public class StudentSelectionPanel extends JPanel {
         }
         return selectedIds;
     }
+    
+    /**
+     * Preselect students by their IDs (for edit mode).
+     */
+    public void preselectStudents(List<Integer> studentIds) {
+        if (studentIds == null || studentIds.isEmpty()) {
+            return;
+        }
+        
+        Set<Integer> idsToSelect = new HashSet<>(studentIds);
+        int selectedCount = 0;
+        
+        for (Map.Entry<Integer, JCheckBox> entry : studentCheckboxes.entrySet()) {
+            if (idsToSelect.contains(entry.getKey())) {
+                entry.getValue().setSelected(true);
+                selectedCount++;
+            } else {
+                entry.getValue().setSelected(false);
+            }
+        }
+        
+        // Update the select all checkbox
+        selectAllCheckbox.setSelected(selectedCount == studentCheckboxes.size());
+        
+        // Update selection count label
+        updateSelectionCount();
+        
+        System.out.println("Preselected " + selectedCount + " students");
+    }
+
 }

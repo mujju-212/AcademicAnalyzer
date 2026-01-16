@@ -29,12 +29,8 @@ public class CalculationUtils {
      * Calculate SGPA based on percentage
      */
     public static double calculateSGPA(double percentage) {
-        for (int i = 0; i < SGPA_THRESHOLDS.length; i++) {
-            if (percentage >= SGPA_THRESHOLDS[i]) {
-                return SGPA_VALUES[i];
-            }
-        }
-        return SGPA_VALUES[SGPA_VALUES.length - 1]; // Return 0.0 if below all thresholds
+        // Calculate CGPA as percentage / 10 (e.g., 94.14% = 9.41 CGPA)
+        return percentage / 10.0;
     }
 
     /**

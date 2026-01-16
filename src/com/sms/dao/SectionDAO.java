@@ -975,7 +975,7 @@ public class SectionDAO {
             ps.close();
             
             // 2. Delete student marks for students in this section
-            String deleteMarks = "DELETE FROM student_marks WHERE student_id IN (SELECT id FROM students WHERE section_id = ?)";
+            String deleteMarks = "DELETE FROM entered_exam_marks WHERE student_id IN (SELECT id FROM students WHERE section_id = ?)";
             ps = conn.prepareStatement(deleteMarks);
             ps.setInt(1, sectionId);
             ps.executeUpdate();

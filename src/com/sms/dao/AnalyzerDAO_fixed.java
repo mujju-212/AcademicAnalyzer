@@ -154,16 +154,16 @@ public class AnalyzerDAO {
     
     // Get marks for a student - returns nested map: subject -> exam type -> marks
     // Only fetches subjects that are linked to the student's section
-    // UPDATED: Uses student_marks table with exam_type_id FK
+    // UPDATED: Uses entered_exam_marks table with exam_type_id FK
     private Map<String, Map<String, Integer>> getStudentMarks(int studentId, int sectionId) {
         Map<String, Map<String, Integer>> marks = new HashMap<>();
         try {
             Connection conn = DatabaseConnection.getConnection();
             
-            // Simplified query: Just get marks from student_marks table
-            // student_marks already has the correct subject_id and exam_type_id
+            // Simplified query: Just get marks from entered_exam_marks table
+            // entered_exam_marks already has the correct subject_id and exam_type_id
             String query = "SELECT sub.subject_name, et.exam_name, sm.marks_obtained " +
-                          "FROM student_marks sm " +
+                          "FROM entered_exam_marks sm " +
                           "JOIN subjects sub ON sm.subject_id = sub.id " +
                           "JOIN exam_types et ON sm.exam_type_id = et.id " +
                           "WHERE sm.student_id = ? " +
@@ -293,7 +293,7 @@ public class AnalyzerDAO {
                 // Get marks for ALL students for this subject in ONE query
                 StringBuilder marksQuery = new StringBuilder(
                     "SELECT sm.student_id, et.exam_name, sm.marks_obtained " +
-                    "FROM student_marks sm " +
+                    "FROM entered_exam_marks sm " +
                     "JOIN exam_types et ON sm.exam_type_id = et.id " +
                     "WHERE sm.subject_id = ? AND sm.student_id IN ("
                 );
@@ -504,7 +504,7 @@ public class AnalyzerDAO {
                 "    AVG(sm.marks_obtained) as avg_marks " +
                 "FROM section_subjects ss " +
                 "INNER JOIN subjects sub ON ss.subject_id = sub.id " +
-                "LEFT JOIN student_marks sm ON sm.subject_id = sub.id " +
+                "LEFT JOIN entered_exam_marks sm ON sm.subject_id = sub.id " +
                 "LEFT JOIN exam_types et ON sm.exam_type_id = et.id " +
                 "LEFT JOIN students s ON sm.student_id = s.id AND s.section_id = ss.section_id AND s.created_by = ? " +
                 "WHERE ss.section_id = ? " + filterClause.toString() +
@@ -1175,7 +1175,7 @@ public class AnalyzerDAO {
             
             // Get student's marks for this subject
             String marksQuery = "SELECT et.exam_name, sm.marks_obtained " +
-                              "FROM student_marks sm " +
+                              "FROM entered_exam_marks sm " +
                               "JOIN exam_types et ON sm.exam_type_id = et.id " +
                               "WHERE sm.student_id = ? AND sm.subject_id = ?";
             PreparedStatement psMarks = conn.prepareStatement(marksQuery);
@@ -1665,7 +1665,7 @@ public class AnalyzerDAO {
                        "    SUM(sm.marks_obtained) AS subject_marks, " +
                        "    ss.max_marks AS subject_max_marks " +
                        "FROM students s " +
-                       "INNER JOIN student_marks sm ON sm.student_id = s.id " +
+                       "INNER JOIN entered_exam_marks sm ON sm.student_id = s.id " +
                        "INNER JOIN exam_types et ON sm.exam_type_id = et.id " +
                        "INNER JOIN subjects sub ON sm.subject_id = sub.id " +
                        "INNER JOIN section_subjects ss ON ss.subject_id = sub.id AND ss.section_id = s.section_id " +
@@ -1681,7 +1681,7 @@ public class AnalyzerDAO {
                        "FROM students s " +
                        "CROSS JOIN section_subjects ss ON ss.section_id = s.section_id " +
                        "JOIN subjects sub ON ss.subject_id = sub.id " +
-                       "LEFT JOIN student_marks sm ON sm.student_id = s.id AND sm.subject_id = ss.subject_id " +
+                       "LEFT JOIN entered_exam_marks sm ON sm.student_id = s.id AND sm.subject_id = ss.subject_id " +
                        "WHERE s.section_id = ? AND s.roll_number = ? " +
                        "GROUP BY sub.subject_name, ss.max_marks " +
                        "HAVING (COALESCE(SUM(sm.marks_obtained), 0) * 100.0 / ss.max_marks) < 50";
@@ -1952,11 +1952,11 @@ public class AnalyzerDAO {
                 rs2.close();
                 ps2.close();
                 
-                // If no components found in new system, get from old system (student_marks)
+                // If no components found in new system, get from old system (entered_exam_marks)
                 if (!hasComponents) {
                     String examTypeQuery1 = 
                         "SELECT DISTINCT et.exam_name " +
-                        "FROM student_marks sm " +
+                        "FROM entered_exam_marks sm " +
                         "JOIN exam_types et ON sm.exam_type_id = et.id " +
                         "JOIN students s ON sm.student_id = s.id " +
                         "WHERE sm.subject_id = ? AND s.section_id = ? " +

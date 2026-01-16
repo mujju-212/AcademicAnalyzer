@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ student.name }} - Results</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="{{ url_for('static', filename='results.js') }}" defer></script>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div class="logo-section">
+                <div class="logo">
+                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="3" y="13" width="4" height="8" rx="1" fill="#667eea"/>
+                        <rect x="10" y="8" width="4" height="13" rx="1" fill="#764ba2"/>
+                        <rect x="17" y="3" width="4" height="18" rx="1" fill="#667eea"/>
+                    </svg>
+                </div>
+                <div class="logo-text">
+                    <h1>Student Result Portal</h1>
+                    <p>View Your Academic Results</p>
+                </div>
+            </div>
+            <div class="user-section">
+                <div class="user-info">
+                    <div class="user-avatar">{{ student.name[0]|upper }}</div>
+                    <span class="user-name">{{ student.name }} ({{ student.roll_number }})</span>
+                </div>
+                <button class="btn-logout" onclick="window.location.href='/'">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                        <polyline points="16 17 21 12 16 7"/>
+                        <line x1="21" y1="12" x2="9" y2="12"/>
+                    </svg>
+                    Logout
+                </button>
+                <a href="#" class="btn-home">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+                        <polyline points="9 22 9 12 15 12 15 22"/>
+                    </svg>
+                    Home
+                </a>
+            </div>
+        </div>
+
+        {% if launched_results %}
+            {% for result in launched_results %}
+            <div class="main-content">
+                <!-- Sidebar -->
+                <div class="sidebar">
+                    <h2>Enter Your Details</h2>
+                    <form>
+                        <div class="form-group">
+                            <label>Section</label>
+                            <select class="form-control">
+                                <option>{{ result.section_name }}</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Roll Number</label>
+                            <input type="text" class="form-control" value="{{ student.roll_number }}" readonly>
+                        </div>
+                        <button type="button" class="btn btn-primary">View My Results</button>
+                    </form>
+                </div>
+
+                <!-- Main Content -->
+                <div class="result-card">
+                    <!-- Result Title -->
+                    <div class="result-header">
+                        <div>
+                            <h2 class="result-title">A ISE</h2>
+                            <div class="result-meta">
+                                Academic Year: {{ result.academic_year }} | Semester: {{ result.semester }}
+                                <br>Launched on: {{ result.launch_date if result.launch_date is string else result.launch_date.strftime('%d/%m/%Y %H:%M') if result.launch_date else 'N/A' }}
+                            </div>
+                        </div>
+                        <button onclick="downloadPDF('{{ result.launch_id }}', '{{ student.student_id }}')" 
+                                class="btn btn-success">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                <polyline points="7 10 12 15 17 10"/>
+                                <line x1="12" y1="15" x2="12" y2="3"/>
+                            </svg>
+                            Download PDF
+                        </button>
+                    </div>
+
+                    <!-- Stats Grid -->
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-label">Total Marks</div>
+                            <div class="stat-value">{{ result.total_marks|int }}</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Total Possible</div>
+                            <div class="stat-value">{{ result.total_max_marks|int }}</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Percentage</div>
+                            <div class="stat-value">{{ "%.2f"|format(result.percentage) }}%</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">CGPA</div>
+                            <div class="stat-value">{{ "%.2f"|format(result.cgpa) }}</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Grade</div>
+                            <div class="stat-value">{{ result.grade }}</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Status</div>
+                            <div class="stat-value" style="color: {{ '#48bb78' if result.status == 'Passed' else '#f56565' }}">{{ result.status }}</div>
+                        </div>
+                    </div>
+
+                    <!-- Section Title -->
+                    <h2 style="margin-top: 2rem; margin-bottom: 1.5rem; color: #5a67d8; font-size: 1.5rem; font-weight: 600;">Subject-wise Performance</h2>
+
+                <!-- Subject-wise Breakdown -->
+                <div class="table-container">
+                    <table class="result-table">
+                        <thead>
+                            <tr>
+                                <th rowspan="2" style="vertical-align: middle;">Subject</th>
+                                <th colspan="10" style="text-align: center;">Exam Components</th>
+                                <th rowspan="2" style="vertical-align: middle;">Weighted<br>Total</th>
+                                <th rowspan="2" style="vertical-align: middle;">Max<br>Marks</th>
+                                <th rowspan="2" style="vertical-align: middle;">Percentage</th>
+                                <th rowspan="2" style="vertical-align: middle;">Grade</th>
+                                <th rowspan="2" style="vertical-align: middle;">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% if result.subjects and result.subjects|length > 0 %}
+                                {% for subject in result.subjects %}
+                                <tr>
+                                    <td class="subject-name" style="font-weight: 600;">{{ subject.subject_name }}</td>
+                                    
+                                    {% if subject.exam_types %}
+                                        {% for exam in subject.exam_types %}
+                                        <td class="exam-marks" style="white-space: nowrap; padding: 8px 4px; font-size: 0.9em;">
+                                            <div style="font-weight: 600; color: #333;">{{ exam.exam_name }}</div>
+                                            <div style="color: #555;">{{ exam.obtained if exam.obtained is defined else "0" }}/{{ exam.max if exam.max is defined else "0" }}</div>
+                                            <div style="font-size: 0.85em; color: #666;">({{ exam.weightage if exam.weightage is defined else "0" }}%)</div>
+                                        </td>
+                                        {% endfor %}
+                                        <!-- Fill empty cells if less than 10 exams -->
+                                        {% for i in range(10 - subject.exam_types|length) %}
+                                        <td style="background: #f9f9f9;"></td>
+                                        {% endfor %}
+                                    {% else %}
+                                        {% for i in range(10) %}
+                                        <td style="background: #f9f9f9;"></td>
+                                        {% endfor %}
+                                    {% endif %}
+                                    
+                                    <td class="total-marks" style="font-weight: 600; font-size: 1.05em;">{{ subject.weighted_total|int if subject.weighted_total else 0 }}</td>
+                                    <td>{{ subject.max_marks if subject.max_marks else 100 }}</td>
+                                    <td class="percentage" style="font-weight: 600;">
+                                        {% if subject.weighted_total and subject.max_marks %}
+                                            {{ "{:.2f}".format((subject.weighted_total|float / subject.max_marks * 100)) }}%
+                                        {% else %}
+                                            0.00%
+                                        {% endif %}
+                                    </td>
+                                    <td class="grade" style="font-weight: 600; font-size: 1.05em;">{{ subject.grade if subject.grade else "N/A" }}</td>
+                                    <td class="status-{{ 'passed' if subject.passed else 'failed' }}" style="font-weight: 600;">
+                                        {{ 'Passed' if subject.passed else 'Failed' }}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                                
+                                <!-- Overall Total Row -->
+                                <tr class="total-row">
+                                    <td><strong>Overall Total</strong></td>
+                                    <td colspan="10" style="text-align: center; background: #f0f0f0;">-</td>
+                                    <td><strong>{{ result.total_marks|int if result.total_marks else 0 }}</strong></td>
+                                    <td><strong>{{ result.total_max_marks|int if result.total_max_marks else 0 }}</strong></td>
+                                    <td><strong>{{ "{:.2f}".format(result.percentage|float) }}%</strong></td>
+                                    <td><strong>{{ result.grade }}</strong></td>
+                                    <td class="status-{{ result.status|lower }}"><strong>{{ result.status }}</strong></td>
+                                </tr>
+                            {% else %}
+                                <tr>
+                                    <td colspan="17" style="text-align: center; padding: 20px; color: #666;">
+                                        No subject data available
+                                    </td>
+                                </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Visual Analytics -->
+                <div style="margin-top: 30px;">
+                    <h3 style="margin-bottom: 20px; color: #333;">Performance Analytics</h3>
+                    <div class="charts-grid">
+                        <div class="chart-card">
+                            <canvas id="subjectChart{{ loop.index }}"></canvas>
+                        </div>
+                        <div class="chart-card">
+                            <canvas id="examTypeChart{{ loop.index }}"></canvas>
+                        </div>
+                        <div class="chart-card">
+                            <canvas id="passFailChart{{ loop.index }}"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Initialize charts for this result -->
+            <script>
+                (function() {
+                    const resultData{{ loop.index }} = {
+                        subjects: {{ (result.subjects|tojson|safe) if result.subjects else '[]' }},
+                        overall: {
+                            total_obtained: {{ (result.total_marks|default(0, true))|float }},
+                            total_max: {{ (result.total_max_marks|default(0, true))|float }},
+                            percentage: {{ (result.percentage|default(0, true))|float }},
+                            cgpa: {{ (result.cgpa|default(0, true))|float }},
+                            grade: '{{ result.grade|default("N/A", true)|e }}',
+                            status: '{{ result.status|default("Unknown", true)|e }}'
+                        }
+                    };
+                    
+                    // Initialize charts when DOM is ready
+                    if (document.readyState === 'loading') {
+                        document.addEventListener('DOMContentLoaded', function() {
+                            if (typeof initializeCharts === 'function') {
+                                initializeCharts({{ loop.index }}, resultData{{ loop.index }});
+                            }
+                        });
+                    } else {
+                        if (typeof initializeCharts === 'function') {
+                            initializeCharts({{ loop.index }}, resultData{{ loop.index }});
+                        }
+                    }
+                })();
+            </script>
+            {% endfor %}
+        {% else %}
+            <div class="card">
+                <div class="alert alert-info show">
+                    No results have been launched for you yet. Please check back later.
+                </div>
+            </div>
+        {% endif %}
+    </div>
+</body>
+</html>

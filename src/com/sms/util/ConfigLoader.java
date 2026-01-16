@@ -174,4 +174,19 @@ public class ConfigLoader {
     public static String getEmailJsPublicKey() {
         return get("EMAILJS_PUBLIC_KEY", "");
     }
+    
+    /**
+     * Get MailerSend configuration
+     */
+    public static String getMailerSendApiKey() {
+        return get("MAILERSEND_API_KEY", "");
+    }
+    
+    public static String getMailerSendFromEmail() {
+        return get("MAILERSEND_FROM_EMAIL", "noreply@yourdomain.com");
+    }
+    
+    public static String getMailerSendFromName() {
+        return get("MAILERSEND_FROM_NAME", "Academic Analyzer");
+    }
 }

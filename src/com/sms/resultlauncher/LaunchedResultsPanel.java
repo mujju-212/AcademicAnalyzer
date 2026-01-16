@@ -80,7 +80,7 @@ public class LaunchedResultsPanel extends JPanel {
         };
         
         resultsTable = new JTable(tableModel);
-        resultsTable.setRowHeight(45);
+        resultsTable.setRowHeight(50);
         resultsTable.setFont(new Font("SansSerif", Font.PLAIN, 12));
         resultsTable.getTableHeader().setFont(new Font("SansSerif", Font.BOLD, 12));
         resultsTable.getTableHeader().setBackground(new Color(249, 250, 251));
@@ -90,13 +90,13 @@ public class LaunchedResultsPanel extends JPanel {
         resultsTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         
         // Set column widths
-        resultsTable.getColumnModel().getColumn(0).setPreferredWidth(150); // Launch Name
-        resultsTable.getColumnModel().getColumn(1).setPreferredWidth(80);  // Section
-        resultsTable.getColumnModel().getColumn(2).setPreferredWidth(70);  // Students
-        resultsTable.getColumnModel().getColumn(3).setPreferredWidth(90);  // Components
-        resultsTable.getColumnModel().getColumn(4).setPreferredWidth(80);  // Status
-        resultsTable.getColumnModel().getColumn(5).setPreferredWidth(120); // Launch Date
-        resultsTable.getColumnModel().getColumn(6).setPreferredWidth(150); // Actions
+        resultsTable.getColumnModel().getColumn(0).setPreferredWidth(200); // Launch Name
+        resultsTable.getColumnModel().getColumn(1).setPreferredWidth(100);  // Section
+        resultsTable.getColumnModel().getColumn(2).setPreferredWidth(80);  // Students
+        resultsTable.getColumnModel().getColumn(3).setPreferredWidth(100);  // Components
+        resultsTable.getColumnModel().getColumn(4).setPreferredWidth(90);  // Status
+        resultsTable.getColumnModel().getColumn(5).setPreferredWidth(150); // Launch Date
+        resultsTable.getColumnModel().getColumn(6).setPreferredWidth(90); // Actions dropdown
         
         // Custom cell renderer
         DefaultTableCellRenderer cellRenderer = new DefaultTableCellRenderer() {
@@ -260,39 +260,76 @@ public class LaunchedResultsPanel extends JPanel {
     private void editResult(int row) {
         if (row >= 0 && row < launchedResults.size()) {
             LaunchedResult result = launchedResults.get(row);
-            JOptionPane.showMessageDialog(this,
-                "Edit functionality will be implemented soon!",
-                "Feature Coming Soon", JOptionPane.INFORMATION_MESSAGE);
+            
+            // Load the result for editing with all selections
+            if (parentLauncher != null) {
+                parentLauncher.loadResultForEdit(result);
+            }
         }
     }
     
-    // Custom renderer for action buttons
+    private void deleteResult(int row) {
+        if (row >= 0 && row < launchedResults.size()) {
+            LaunchedResult result = launchedResults.get(row);
+            
+            int choice = JOptionPane.showConfirmDialog(this,
+                "Are you sure you want to delete the result: " + result.getLaunchName() + "?\n" +
+                "This will permanently remove all result data for this launch.\n" +
+                "This action cannot be undone!",
+                "Confirm Delete",
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.WARNING_MESSAGE);
+            
+            if (choice == JOptionPane.YES_OPTION) {
+                SwingWorker<Boolean, Void> worker = new SwingWorker<Boolean, Void>() {
+                    @Override
+                    protected Boolean doInBackground() throws Exception {
+                        return parentLauncher.getDAO().deleteResult(result.getId());
+                    }
+
+                    @Override
+                    protected void done() {
+                        try {
+                            Boolean success = get();
+                            if (success) {
+                                JOptionPane.showMessageDialog(LaunchedResultsPanel.this,
+                                    "Result deleted successfully!",
+                                    "Success", JOptionPane.INFORMATION_MESSAGE);
+                                refreshLaunchedResults();
+                            } else {
+                                JOptionPane.showMessageDialog(LaunchedResultsPanel.this,
+                                    "Failed to delete result.",
+                                    "Error", JOptionPane.ERROR_MESSAGE);
+                            }
+                        } catch (Exception e) {
+                            JOptionPane.showMessageDialog(LaunchedResultsPanel.this,
+                                "Error deleting result: " + e.getMessage(),
+                                "Error", JOptionPane.ERROR_MESSAGE);
+                        }
+                    }
+                };
+                worker.execute();
+            }
+        }
+    }
+    
+    // Custom renderer for action dropdown
     private class ActionButtonRenderer extends JPanel implements javax.swing.table.TableCellRenderer {
-        private JButton takeDownButton;
-        private JButton editButton;
+        private JComboBox<String> actionsCombo;
         
         public ActionButtonRenderer() {
-            setLayout(new FlowLayout(FlowLayout.CENTER, 5, 5));
+            setLayout(new FlowLayout(FlowLayout.CENTER, 5, 10));
             setOpaque(true);
+            setBackground(ResultLauncherUtils.CARD_COLOR);
             
-            takeDownButton = new JButton("Take Down");
-            takeDownButton.setFont(new Font("SansSerif", Font.BOLD, 10));
-            takeDownButton.setPreferredSize(new Dimension(80, 25));
-            takeDownButton.setBackground(ResultLauncherUtils.DANGER_COLOR);
-            takeDownButton.setForeground(Color.WHITE);
-            takeDownButton.setBorderPainted(false);
-            takeDownButton.setFocusPainted(false);
+            actionsCombo = new JComboBox<>(new String[]{"Actions", "Edit", "Take Down", "Delete"});
+            actionsCombo.setFont(new Font("SansSerif", Font.BOLD, 11));
+            actionsCombo.setPreferredSize(new Dimension(120, 30));
+            actionsCombo.setBackground(Color.WHITE);
+            actionsCombo.setForeground(ResultLauncherUtils.TEXT_PRIMARY);
+            actionsCombo.setCursor(new Cursor(Cursor.HAND_CURSOR));
             
-            editButton = new JButton("Edit");
-            editButton.setFont(new Font("SansSerif", Font.BOLD, 10));
-            editButton.setPreferredSize(new Dimension(60, 25));
-            editButton.setBackground(ResultLauncherUtils.INFO_COLOR);
-            editButton.setForeground(Color.WHITE);
-            editButton.setBorderPainted(false);
-            editButton.setFocusPainted(false);
-            
-            add(editButton);
-            add(takeDownButton);
+            add(actionsCombo);
         }
         
         @Override
@@ -301,78 +338,62 @@ public class LaunchedResultsPanel extends JPanel {
             
             if (row < launchedResults.size()) {
                 LaunchedResult result = launchedResults.get(row);
-                takeDownButton.setEnabled(result.isActive());
-                if (!result.isActive()) {
-                    takeDownButton.setText("Taken Down");
-                    takeDownButton.setBackground(Color.GRAY);
-                } else {
-                    takeDownButton.setText("Take Down");
-                    takeDownButton.setBackground(ResultLauncherUtils.DANGER_COLOR);
-                }
+                actionsCombo.setEnabled(true);
             }
             
             return this;
         }
     }
     
-    // Custom editor for action buttons
+    // Custom editor for action dropdown
     private class ActionButtonEditor extends DefaultCellEditor {
         private JPanel panel;
-        private JButton takeDownButton;
-        private JButton editButton;
+        private JComboBox<String> actionsCombo;
         private int currentRow;
         
         public ActionButtonEditor() {
             super(new JCheckBox());
             
-            panel = new JPanel(new FlowLayout(FlowLayout.CENTER, 5, 5));
+            panel = new JPanel(new FlowLayout(FlowLayout.CENTER, 5, 10));
             panel.setOpaque(true);
+            panel.setBackground(ResultLauncherUtils.CARD_COLOR);
             
-            takeDownButton = new JButton("Take Down");
-            takeDownButton.setFont(new Font("SansSerif", Font.BOLD, 10));
-            takeDownButton.setPreferredSize(new Dimension(80, 25));
-            takeDownButton.setBackground(ResultLauncherUtils.DANGER_COLOR);
-            takeDownButton.setForeground(Color.WHITE);
-            takeDownButton.setBorderPainted(false);
-            takeDownButton.setFocusPainted(false);
-            takeDownButton.addActionListener(e -> {
-                fireEditingStopped();
-                takeDownResult(currentRow);
+            actionsCombo = new JComboBox<>(new String[]{"Actions", "Edit", "Take Down", "Delete"});
+            actionsCombo.setFont(new Font("SansSerif", Font.BOLD, 11));
+            actionsCombo.setPreferredSize(new Dimension(120, 30));
+            actionsCombo.setBackground(Color.WHITE);
+            actionsCombo.setForeground(ResultLauncherUtils.TEXT_PRIMARY);
+            actionsCombo.setCursor(new Cursor(Cursor.HAND_CURSOR));
+            
+            actionsCombo.addActionListener(e -> {
+                String selected = (String) actionsCombo.getSelectedItem();
+                if (selected != null && !"Actions".equals(selected)) {
+                    fireEditingStopped();
+                    SwingUtilities.invokeLater(() -> {
+                        switch (selected) {
+                            case "Edit":
+                                editResult(currentRow);
+                                break;
+                            case "Take Down":
+                                takeDownResult(currentRow);
+                                break;
+                            case "Delete":
+                                deleteResult(currentRow);
+                                break;
+                        }
+                        actionsCombo.setSelectedIndex(0); // Reset to "Actions"
+                    });
+                }
             });
             
-            editButton = new JButton("Edit");
-            editButton.setFont(new Font("SansSerif", Font.BOLD, 10));
-            editButton.setPreferredSize(new Dimension(60, 25));
-            editButton.setBackground(ResultLauncherUtils.INFO_COLOR);
-            editButton.setForeground(Color.WHITE);
-            editButton.setBorderPainted(false);
-            editButton.setFocusPainted(false);
-            editButton.addActionListener(e -> {
-                fireEditingStopped();
-                editResult(currentRow);
-            });
-            
-            panel.add(editButton);
-            panel.add(takeDownButton);
+            panel.add(actionsCombo);
         }
         
         @Override
         public Component getTableCellEditorComponent(JTable table, Object value,
                 boolean isSelected, int row, int column) {
             currentRow = row;
-            
-            if (row < launchedResults.size()) {
-                LaunchedResult result = launchedResults.get(row);
-                takeDownButton.setEnabled(result.isActive());
-                if (!result.isActive()) {
-                    takeDownButton.setText("Taken Down");
-                    takeDownButton.setBackground(Color.GRAY);
-                } else {
-                    takeDownButton.setText("Take Down");
-                    takeDownButton.setBackground(ResultLauncherUtils.DANGER_COLOR);
-                }
-            }
-            
+            actionsCombo.setSelectedIndex(0); // Reset to "Actions"
             return panel;
         }
         

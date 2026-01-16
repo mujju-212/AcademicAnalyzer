@@ -20,13 +20,19 @@ public class LaunchConfigurationDialog extends JDialog {
     private JCheckBox allowPdfCheckbox;
     private JCheckBox showDetailedCheckbox;
     
+    // Enhanced visibility controls
+    private JCheckBox showComponentMarksCheckbox;
+    private JCheckBox showSubjectDetailsCheckbox;
+    private JCheckBox showRankCheckbox;
+    private JCheckBox showClassStatsCheckbox;
+    
  // In LaunchConfigurationDialog.java, change the constructor:
     public LaunchConfigurationDialog(Window parent) {  // Changed from JFrame to Window
         super(parent, "Launch Configuration", ModalityType.APPLICATION_MODAL);
         this.configuration = new ResultConfiguration();
         
         initializeUI();
-        setSize(500, 600);
+        setSize(550, 750); // Increased height for additional options
         setLocationRelativeTo(parent);
         setDefaultCloseOperation(DISPOSE_ON_CLOSE);
     }
@@ -80,7 +86,7 @@ public class LaunchConfigurationDialog extends JDialog {
         messagePanel.add(messageScrollPane);
         
         // Options
-        JLabel optionsLabel = new JLabel("Additional Options:");
+        JLabel optionsLabel = new JLabel("Display Options:");
         optionsLabel.setFont(new Font("SansSerif", Font.BOLD, 14));
         optionsLabel.setForeground(ResultLauncherUtils.TEXT_PRIMARY);
         optionsLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -94,6 +100,37 @@ public class LaunchConfigurationDialog extends JDialog {
         showDetailedCheckbox.setFont(new Font("SansSerif", Font.PLAIN, 14));
         showDetailedCheckbox.setSelected(true);
         showDetailedCheckbox.setOpaque(false);
+        
+        // Enhanced visibility controls
+        JLabel visibilityLabel = new JLabel("Student Visibility Controls:");
+        visibilityLabel.setFont(new Font("SansSerif", Font.BOLD, 14));
+        visibilityLabel.setForeground(ResultLauncherUtils.TEXT_PRIMARY);
+        visibilityLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        
+        JLabel visibilityDescLabel = new JLabel("Control what information students can see in their results");
+        visibilityDescLabel.setFont(new Font("SansSerif", Font.ITALIC, 11));
+        visibilityDescLabel.setForeground(ResultLauncherUtils.TEXT_SECONDARY);
+        visibilityDescLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        
+        showComponentMarksCheckbox = new JCheckBox("Show Individual Component Marks");
+        showComponentMarksCheckbox.setFont(new Font("SansSerif", Font.PLAIN, 13));
+        showComponentMarksCheckbox.setSelected(true);
+        showComponentMarksCheckbox.setOpaque(false);
+        
+        showSubjectDetailsCheckbox = new JCheckBox("Show Subject-wise Breakdown (Theory/Practical)");
+        showSubjectDetailsCheckbox.setFont(new Font("SansSerif", Font.PLAIN, 13));
+        showSubjectDetailsCheckbox.setSelected(true);
+        showSubjectDetailsCheckbox.setOpaque(false);
+        
+        showRankCheckbox = new JCheckBox("Show Student Rank in Class");
+        showRankCheckbox.setFont(new Font("SansSerif", Font.PLAIN, 13));
+        showRankCheckbox.setSelected(false); // Privacy: default off
+        showRankCheckbox.setOpaque(false);
+        
+        showClassStatsCheckbox = new JCheckBox("Show Class Statistics (Avg, Highest, Lowest)");
+        showClassStatsCheckbox.setFont(new Font("SansSerif", Font.PLAIN, 13));
+        showClassStatsCheckbox.setSelected(true);
+        showClassStatsCheckbox.setOpaque(false);
         
         // Buttons
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
@@ -122,6 +159,14 @@ public class LaunchConfigurationDialog extends JDialog {
         mainPanel.add(Box.createVerticalStrut(5));
         mainPanel.add(allowPdfCheckbox);
         mainPanel.add(showDetailedCheckbox);
+        mainPanel.add(Box.createVerticalStrut(15));
+        mainPanel.add(visibilityLabel);
+        mainPanel.add(visibilityDescLabel);
+        mainPanel.add(Box.createVerticalStrut(8));
+        mainPanel.add(showComponentMarksCheckbox);
+        mainPanel.add(showSubjectDetailsCheckbox);
+        mainPanel.add(showRankCheckbox);
+        mainPanel.add(showClassStatsCheckbox);
         mainPanel.add(Box.createVerticalStrut(20));
         mainPanel.add(buttonPanel);
         
@@ -175,6 +220,12 @@ public class LaunchConfigurationDialog extends JDialog {
         configuration.setEmailMessage(emailMessageArea.getText().trim());
         configuration.setAllowPdfDownload(allowPdfCheckbox.isSelected());
         configuration.setShowDetailedResults(showDetailedCheckbox.isSelected());
+        
+        // Set visibility controls
+        configuration.setShowComponentMarks(showComponentMarksCheckbox.isSelected());
+        configuration.setShowSubjectDetails(showSubjectDetailsCheckbox.isSelected());
+        configuration.setShowRank(showRankCheckbox.isSelected());
+        configuration.setShowClassStats(showClassStatsCheckbox.isSelected());
         
         confirmed = true;
         dispose();

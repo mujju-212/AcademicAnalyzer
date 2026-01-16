@@ -25,6 +25,10 @@ public class ResultLauncher extends JPanel {
     private List<Integer> selectedStudentIds;
     private List<Component> selectedComponents;
     
+    // Edit mode tracking
+    private boolean isEditMode = false;
+    private int editingLaunchId = -1;
+    
     // Constructor for standalone dialog (backward compatibility)
     public ResultLauncher(JFrame parent) {
         this(parent, null);
@@ -157,8 +161,8 @@ public class ResultLauncher extends JPanel {
         // Left panel with selection components
         JPanel leftPanel = new JPanel();
         leftPanel.setLayout(new BoxLayout(leftPanel, BoxLayout.Y_AXIS));
-        leftPanel.setPreferredSize(new Dimension(400, 0));
         leftPanel.setOpaque(false);
+        // Don't set preferred size - let it grow based on content
         
         // Section selection
         sectionPanel = new SectionSelectionPanel(this);
@@ -183,8 +187,9 @@ public class ResultLauncher extends JPanel {
         leftPanel.add(componentPanel);
         leftPanel.add(Box.createVerticalStrut(8));
         leftPanel.add(launchPanel);
-        leftPanel.add(Box.createVerticalGlue());
+        leftPanel.add(Box.createVerticalStrut(10));
         
+        // Wrap left panel in scroll pane so all controls are accessible
         JScrollPane leftScrollPane = new JScrollPane(leftPanel);
         leftScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
         leftScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
@@ -276,19 +281,26 @@ public class ResultLauncher extends JPanel {
             JButton launchButton = findLaunchButton();
             if (launchButton != null) {
                 launchButton.setEnabled(false);
-                launchButton.setText("🔄 Launching...");
+                launchButton.setText(isEditMode ? "🔄 Updating..." : "🔄 Launching...");
             }
             
             SwingWorker<Boolean, Void> worker = new SwingWorker<Boolean, Void>() {
                 @Override
                 protected Boolean doInBackground() throws Exception {
                     System.out.println("=== SWING WORKER STARTED ===");
-                    System.out.println("Calling DAO.launchResults...");
                     
-                    boolean result = dao.launchResults(selectedSectionId, selectedStudentIds, 
+                    boolean result;
+                    if (isEditMode && editingLaunchId > 0) {
+                        System.out.println("UPDATE MODE - Updating launch ID: " + editingLaunchId);
+                        result = dao.updateResult(editingLaunchId, selectedStudentIds, 
+                                                 selectedComponents, config);
+                    } else {
+                        System.out.println("CREATE MODE - Launching new results");
+                        result = dao.launchResults(selectedSectionId, selectedStudentIds, 
                                                    selectedComponents, config);
+                    }
                     
-                    System.out.println("DAO.launchResults returned: " + result);
+                    System.out.println("DAO operation returned: " + result);
                     return result;
                 }
                 
@@ -299,7 +311,7 @@ public class ResultLauncher extends JPanel {
                     // Re-enable the launch button
                     if (launchButton != null) {
                         launchButton.setEnabled(true);
-                        launchButton.setText("🚀 Launch Results");
+                        launchButton.setText(isEditMode ? "📝 Update Results" : "🚀 Launch Results");
                     }
                     
                     try {
@@ -307,21 +319,34 @@ public class ResultLauncher extends JPanel {
                         System.out.println("Worker result: " + success);
                         
                         if (success) {
+                            String message = isEditMode ? 
+                                "Results updated successfully!" : 
+                                "Results launched successfully!";
+                            String title = isEditMode ? "Update Successful" : "Launch Successful";
+                            
                             JOptionPane.showMessageDialog(ResultLauncher.this,
-                                "Results launched successfully!",
-                                "Launch Successful", JOptionPane.INFORMATION_MESSAGE);
+                                message, title, JOptionPane.INFORMATION_MESSAGE);
+                            
+                            // Clear edit mode
+                            isEditMode = false;
+                            editingLaunchId = -1;
+                            
                             resultsPanel.refreshLaunchedResults();
                         } else {
+                            String message = isEditMode ? 
+                                "Failed to update results. Please check console for details." :
+                                "Failed to launch results. Please check console for details.";
+                            
                             JOptionPane.showMessageDialog(ResultLauncher.this,
-                                "Failed to launch results. Please check console for details.",
-                                "Launch Failed", JOptionPane.ERROR_MESSAGE);
+                                message,
+                                "Operation Failed", JOptionPane.ERROR_MESSAGE);
                         }
                     } catch (Exception e) {
                         System.err.println("Error in worker done(): " + e.getMessage());
                         e.printStackTrace();
                         JOptionPane.showMessageDialog(ResultLauncher.this,
-                            "Error launching results: " + e.getMessage(),
-                            "Launch Error", JOptionPane.ERROR_MESSAGE);
+                            "Error: " + e.getMessage(),
+                            "Operation Error", JOptionPane.ERROR_MESSAGE);
                     }
                 }
             };
@@ -407,6 +432,50 @@ public class ResultLauncher extends JPanel {
     public int getSelectedSectionId() { return selectedSectionId; }
     public List<Integer> getSelectedStudentIds() { return selectedStudentIds; }
     public List<Component> getSelectedComponents() { return selectedComponents; }
+    
+    // Method to load complete result for editing/re-launching
+    public void loadResultForEdit(LaunchedResult result) {
+        isEditMode = true;
+        editingLaunchId = result.getId();
+        selectedSectionId = result.getSectionId();
+        
+        // Select section
+        if (sectionPanel != null) {
+            sectionPanel.selectSection(result.getSectionId());
+        }
+        
+        // Load and pre-select students
+        if (studentPanel != null) {
+            studentPanel.loadStudentsForSection(result.getSectionId());
+            SwingUtilities.invokeLater(() -> {
+                studentPanel.preselectStudents(result.getStudentIds());
+            });
+        }
+        
+        // Load and pre-select components
+        if (componentPanel != null) {
+            componentPanel.loadComponentsForSection(result.getSectionId());
+            SwingUtilities.invokeLater(() -> {
+                componentPanel.preselectComponents(result.getComponentIds());
+            });
+        }
+        
+        // Store selections
+        selectedStudentIds = new ArrayList<>(result.getStudentIds());
+        // Components will be loaded asynchronously
+        
+        // Show info message
+        SwingUtilities.invokeLater(() -> {
+            JOptionPane.showMessageDialog(this,
+                "Editing: " + result.getLaunchName() + "\n\n" +
+                "Pre-selected:\n" +
+                "- " + result.getStudentIds().size() + " students\n" +
+                "- " + result.getComponentIds().size() + " components\n\n" +
+                "You can modify selections and preview before updating.",
+                "Edit Mode",
+                JOptionPane.INFORMATION_MESSAGE);
+        });
+    }
     
     // Static method to open from dashboard
     public static void openResultLauncher(JFrame parent) {

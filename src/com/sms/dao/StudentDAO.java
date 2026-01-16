@@ -220,7 +220,7 @@ return false;
             conn.setAutoCommit(false);
             
             // Delete marks first
-            String deleteMarks = "DELETE FROM student_marks WHERE student_id = ?";
+            String deleteMarks = "DELETE FROM entered_exam_marks WHERE student_id = ?";
             ps = conn.prepareStatement(deleteMarks);
             ps.setInt(1, studentId);
             ps.executeUpdate();
@@ -334,7 +334,7 @@ return false;
         Map<String, Integer> marks = new HashMap<>();
         try (Connection conn = DatabaseConnection.getConnection()) {
             String query = "SELECT sub.subject_name, sm.marks_obtained " +
-                          "FROM student_marks sm " +
+                          "FROM entered_exam_marks sm " +
                           "JOIN subjects sub ON sm.subject_id = sub.id " +
                           "WHERE sm.student_id = ?";
             PreparedStatement ps = conn.prepareStatement(query);

@@ -80,6 +80,13 @@
             <artifactId>commons-math3</artifactId>
             <version>3.6.1</version>
         </dependency>
+
+        <!-- MailerSend Java SDK -->
+        <dependency>
+            <groupId>com.mailersend</groupId>
+            <artifactId>java-sdk</artifactId>
+            <version>1.4.2</version>
+        </dependency>
     </dependencies>
 
     <build>

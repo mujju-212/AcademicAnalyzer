@@ -50,7 +50,7 @@ public class DashboardDataManager {
             String query = "SELECT s.student_name, s.roll_number, " +
                           "sub.subject_name, et.exam_name as exam_type, sm.marks_obtained " +
                           "FROM students s " +
-                          "LEFT JOIN student_marks sm ON s.id = sm.student_id " +
+                          "LEFT JOIN entered_exam_marks sm ON s.id = sm.student_id " +
                           "LEFT JOIN subjects sub ON sm.subject_id = sub.id " +
                           "LEFT JOIN exam_types et ON sm.exam_type_id = et.id " +
                           "WHERE s.section_id = ? AND s.created_by = ?";

@@ -36,7 +36,7 @@ public class StudentService {
      */
     public int getStudentsWithMarksCount(int userId) {
         String query = "SELECT COUNT(DISTINCT sm.student_id) as count " +
-                      "FROM student_marks sm " +
+                      "FROM entered_exam_marks sm " +
                       "INNER JOIN students s ON sm.student_id = s.id " +
                       "WHERE sm.created_by = ? " +
                       "AND sm.marks_obtained IS NOT NULL " +
@@ -62,7 +62,7 @@ public class StudentService {
     public String getTopStudent(int userId) {
         String query = "SELECT s.student_name, AVG((sm.marks_obtained / ss.max_marks) * 100) as avg_percentage " +
                       "FROM students s " +
-                      "INNER JOIN student_marks sm ON s.id = sm.student_id " +
+                      "INNER JOIN entered_exam_marks sm ON s.id = sm.student_id " +
                       "INNER JOIN section_subjects ss ON sm.subject_id = ss.subject_id AND s.section_id = ss.section_id " +
                       "WHERE s.created_by = ? " +
                       "AND sm.marks_obtained IS NOT NULL AND ss.max_marks > 0 " +

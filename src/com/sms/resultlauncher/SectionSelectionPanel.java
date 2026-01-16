@@ -18,9 +18,9 @@ public class SectionSelectionPanel extends JPanel {
     public SectionSelectionPanel(ResultLauncher parent) {
         this.parentLauncher = parent;
         
-        setPreferredSize(new Dimension(380, 120));
-        setMaximumSize(new Dimension(380, 120));
-        setMinimumSize(new Dimension(380, 120));
+        setPreferredSize(new Dimension(380, 160));
+        setMaximumSize(new Dimension(380, 160));
+        setMinimumSize(new Dimension(380, 160));
         
         initializeUI();
         loadSections();
@@ -109,6 +109,22 @@ public class SectionSelectionPanel extends JPanel {
     
     public void refreshSections() {
         loadSections();
+    }
+    
+    // Method to programmatically select a section by ID
+    public void selectSection(int sectionId) {
+        if (sectionCombo != null) {
+            for (int i = 0; i < sectionCombo.getItemCount(); i++) {
+                Object item = sectionCombo.getItemAt(i);
+                if (item instanceof SectionItem) {
+                    SectionItem sectionItem = (SectionItem) item;
+                    if (sectionItem.getId() == sectionId) {
+                        sectionCombo.setSelectedIndex(i);
+                        break;
+                    }
+                }
+            }
+        }
     }
     
     // Helper class for combo box items

@@ -1144,10 +1144,10 @@ private void debugDropdownStates() {
                 System.out.println("==============================\n");
             }
             
-            // FALLBACK: If no exam types configured but marks exist, auto-detect from student_marks table
+            // FALLBACK: If no exam types configured but marks exist, auto-detect from entered_exam_marks table
             if (examTypes.isEmpty()) {
                 String fallbackQuery = "SELECT DISTINCT et.id, et.exam_name, et.weightage, MAX(sm.marks_obtained) as max_marks_found " +
-                                     "FROM student_marks sm " +
+                                     "FROM entered_exam_marks sm " +
                                      "JOIN exam_types et ON sm.exam_type_id = et.id " +
                                      "WHERE sm.subject_id = ? " +
                                      "GROUP BY et.id, et.exam_name, et.weightage " +
@@ -1352,9 +1352,9 @@ private void debugDropdownStates() {
             ExamTypeInfo exam = examTypes.get(examIndex);
             
             try (Connection conn = DatabaseConnection.getConnection()) {
-                // Load marks from student_marks table using exam_type_id FK
+                // Load marks from entered_exam_marks table using exam_type_id FK
                 String query = "SELECT s.roll_number, sm.marks_obtained " +
-                              "FROM student_marks sm " +
+                              "FROM entered_exam_marks sm " +
                               "JOIN students s ON sm.student_id = s.id " +
                               "WHERE sm.exam_type_id = ? AND sm.subject_id = ?";
                 
@@ -1463,7 +1463,7 @@ private void debugDropdownStates() {
                 try (Connection conn = DatabaseConnection.getConnection()) {
                     if (value.isEmpty()) {
                         // Delete mark if value is empty
-                        String deleteQuery = "DELETE FROM student_marks WHERE student_id = ? AND exam_type_id = ? AND subject_id = ?";
+                        String deleteQuery = "DELETE FROM entered_exam_marks WHERE student_id = ? AND exam_type_id = ? AND subject_id = ?";
                         try (PreparedStatement ps = conn.prepareStatement(deleteQuery)) {
                             ps.setInt(1, studentId);
                             ps.setInt(2, exam.id);
@@ -1472,7 +1472,7 @@ private void debugDropdownStates() {
                         }
                     } else {
                         // Delete existing mark first (to handle updates)
-                        String deleteQuery = "DELETE FROM student_marks WHERE student_id = ? AND exam_type_id = ? AND subject_id = ?";
+                        String deleteQuery = "DELETE FROM entered_exam_marks WHERE student_id = ? AND exam_type_id = ? AND subject_id = ?";
                         try (PreparedStatement ps = conn.prepareStatement(deleteQuery)) {
                             ps.setInt(1, studentId);
                             ps.setInt(2, exam.id);
@@ -1481,7 +1481,7 @@ private void debugDropdownStates() {
                         }
                         
                         // Insert new mark using exam_type_id FK
-                        String insertQuery = "INSERT INTO student_marks (student_id, exam_type_id, subject_id, marks_obtained, created_by) VALUES (?, ?, ?, ?, ?)";
+                        String insertQuery = "INSERT INTO entered_exam_marks (student_id, exam_type_id, subject_id, marks_obtained, created_by) VALUES (?, ?, ?, ?, ?)";
                         try (PreparedStatement ps = conn.prepareStatement(insertQuery)) {
                             ps.setInt(1, studentId);
                             ps.setInt(2, exam.id);  // exam_type_id FK
@@ -1641,9 +1641,9 @@ private void debugDropdownStates() {
                             
                             if (!value.isEmpty()) {
                                 if (exam.id < 0) {
-                                    // Text-based exam type - use student_marks table
+                                    // Text-based exam type - use entered_exam_marks table
                                     // Delete existing mark
-                                    String deleteQuery = "DELETE FROM student_marks WHERE student_id = ? AND exam_type = ? AND subject_id = ?";
+                                    String deleteQuery = "DELETE FROM entered_exam_marks WHERE student_id = ? AND exam_type = ? AND subject_id = ?";
                                     try (PreparedStatement ps = conn.prepareStatement(deleteQuery)) {
                                         ps.setInt(1, studentId);
                                         ps.setString(2, exam.name);
@@ -1652,7 +1652,7 @@ private void debugDropdownStates() {
                                     }
                                     
                                     // Insert new mark
-                                    String insertQuery = "INSERT INTO student_marks (student_id, exam_type, subject_id, marks_obtained, created_by) VALUES (?, ?, ?, ?, ?)";
+                                    String insertQuery = "INSERT INTO entered_exam_marks (student_id, exam_type, subject_id, marks_obtained, created_by) VALUES (?, ?, ?, ?, ?)";
                                     try (PreparedStatement ps = conn.prepareStatement(insertQuery)) {
                                         ps.setInt(1, studentId);
                                         ps.setString(2, exam.name);

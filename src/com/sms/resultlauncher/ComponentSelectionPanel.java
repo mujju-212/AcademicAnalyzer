@@ -18,17 +18,22 @@ public class ComponentSelectionPanel extends JPanel {
     private JScrollPane scrollPane;
     private JCheckBox selectAllCheckbox;
     private JLabel selectionCountLabel;
+    private JComboBox<String> subjectFilterCombo;
     private Map<Component, JCheckBox> componentCheckboxes;
     private List<Component> currentComponents;
+    private List<Component> filteredComponents;
+    private Map<String, List<Component>> componentsBySubject;
     
     public ComponentSelectionPanel(ResultLauncher parent) {
         this.parentLauncher = parent;
         this.componentCheckboxes = new HashMap<>();
         this.currentComponents = new ArrayList<>();
+        this.filteredComponents = new ArrayList<>();
+        this.componentsBySubject = new HashMap<>();
         
-        setPreferredSize(new Dimension(380, 220));
-        setMaximumSize(new Dimension(380, 220));
-        setMinimumSize(new Dimension(380, 220));
+        setPreferredSize(new Dimension(380, 280)); // Increased height
+        setMaximumSize(new Dimension(380, 280));
+        setMinimumSize(new Dimension(380, 280));
         
         initializeUI();
     }
@@ -41,7 +46,16 @@ public class ComponentSelectionPanel extends JPanel {
         cardPanel.setLayout(new BorderLayout());
         
         JPanel headerPanel = createHeaderPanel();
-        headerPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 15, 0));
+        headerPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 10, 0));
+        
+        JPanel filterPanel = createFilterPanel();
+        filterPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 10, 0));
+        
+        JPanel topPanel = new JPanel();
+        topPanel.setLayout(new BoxLayout(topPanel, BoxLayout.Y_AXIS));
+        topPanel.setOpaque(false);
+        topPanel.add(headerPanel);
+        topPanel.add(filterPanel);
         
         componentsPanel = new JPanel();
         componentsPanel.setLayout(new BoxLayout(componentsPanel, BoxLayout.Y_AXIS));
@@ -52,13 +66,13 @@ public class ComponentSelectionPanel extends JPanel {
         scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
         scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
         scrollPane.setBorder(BorderFactory.createEmptyBorder());
-        scrollPane.setPreferredSize(new Dimension(0, 130)); // Reduced from 250 to 150
+        scrollPane.setPreferredSize(new Dimension(0, 160)); // Increased from 130
         scrollPane.getViewport().setBackground(ResultLauncherUtils.CARD_COLOR);
         
         JPanel footerPanel = createFooterPanel();
-        footerPanel.setBorder(BorderFactory.createEmptyBorder(15, 0, 0, 0));
+        footerPanel.setBorder(BorderFactory.createEmptyBorder(10, 0, 0, 0));
         
-        cardPanel.add(headerPanel, BorderLayout.NORTH);
+        cardPanel.add(topPanel, BorderLayout.NORTH);
         cardPanel.add(scrollPane, BorderLayout.CENTER);
         cardPanel.add(footerPanel, BorderLayout.SOUTH);
         
@@ -83,6 +97,24 @@ public class ComponentSelectionPanel extends JPanel {
         
         panel.add(titleLabel, BorderLayout.WEST);
         panel.add(selectAllCheckbox, BorderLayout.EAST);
+        
+        return panel;
+    }
+    
+    private JPanel createFilterPanel() {
+        JPanel panel = new JPanel(new BorderLayout(10, 0));
+        panel.setOpaque(false);
+        
+        JLabel filterLabel = new JLabel("📚 Subject:");
+        filterLabel.setFont(new Font("SansSerif", Font.PLAIN, 12));
+        
+        subjectFilterCombo = new JComboBox<>();
+        subjectFilterCombo.setFont(new Font("SansSerif", Font.PLAIN, 12));
+        subjectFilterCombo.setEnabled(false);
+        subjectFilterCombo.addActionListener(e -> filterComponentsBySubject());
+        
+        panel.add(filterLabel, BorderLayout.WEST);
+        panel.add(subjectFilterCombo, BorderLayout.CENTER);
         
         return panel;
     }
@@ -135,15 +167,23 @@ public class ComponentSelectionPanel extends JPanel {
         SwingWorker<List<Component>, Void> worker = new SwingWorker<List<Component>, Void>() {
             @Override
             protected List<Component> doInBackground() throws Exception {
+                System.out.println("=== LOADING COMPONENTS FOR SECTION: " + sectionId + " ===");
                 AnalyzerDAO dao = new AnalyzerDAO();
                 List<AnalyzerDAO.SubjectInfo> subjects = dao.getSubjectsForSection(sectionId);
                 
+                System.out.println("Found " + subjects.size() + " subjects");
+                
                 List<Component> allComponents = new ArrayList<>();
+                Map<String, List<Component>> bySubject = new HashMap<>();
                 
                 for (AnalyzerDAO.SubjectInfo subject : subjects) {
+                    System.out.println("Loading components for subject: " + subject.name + " (ID: " + subject.id + ")");
                     List<AnalyzerDAO.ComponentInfo> componentsInfo = dao.getComponentsForSubject(
                         sectionId, subject.id, "all");
                     
+                    System.out.println("  Found " + componentsInfo.size() + " components");
+                    
+                    List<Component> subjectComponents = new ArrayList<>();
                     for (AnalyzerDAO.ComponentInfo compInfo : componentsInfo) {
                         Component component = new Component(
                             compInfo.id,
@@ -156,9 +196,18 @@ public class ComponentSelectionPanel extends JPanel {
                         component.setGroupName(compInfo.groupName);
                         component.setSequenceOrder(compInfo.sequenceOrder);
                         allComponents.add(component);
+                        subjectComponents.add(component);
+                        System.out.println("    - " + compInfo.name + " (" + compInfo.type + ")");
+                    }
+                    
+                    if (!subjectComponents.isEmpty()) {
+                        bySubject.put(subject.name, subjectComponents);
                     }
                 }
                 
+                componentsBySubject = bySubject;
+                
+                System.out.println("Total components loaded: " + allComponents.size());
                 return allComponents;
             }
 
@@ -166,6 +215,8 @@ public class ComponentSelectionPanel extends JPanel {
             protected void done() {
                 try {
                     currentComponents = get();
+                    filteredComponents = new ArrayList<>(currentComponents);
+                    populateSubjectFilter();
                     updateComponentsList();
                     
                 } catch (Exception e) {
@@ -178,12 +229,44 @@ public class ComponentSelectionPanel extends JPanel {
         worker.execute();
     }
     
+    private void populateSubjectFilter() {
+        subjectFilterCombo.removeAllItems();
+        subjectFilterCombo.addItem("All Subjects");
+        
+        List<String> subjects = new ArrayList<>(componentsBySubject.keySet());
+        Collections.sort(subjects);
+        
+        for (String subject : subjects) {
+            subjectFilterCombo.addItem(subject);
+        }
+        
+        subjectFilterCombo.setEnabled(true);
+    }
+    
+    private void filterComponentsBySubject() {
+        String selectedSubject = (String) subjectFilterCombo.getSelectedItem();
+        
+        if (selectedSubject == null || "All Subjects".equals(selectedSubject)) {
+            filteredComponents = new ArrayList<>(currentComponents);
+        } else {
+            filteredComponents = componentsBySubject.getOrDefault(selectedSubject, new ArrayList<>());
+        }
+        
+        updateComponentsList();
+    }
+    
     private void updateComponentsList() {
         componentsPanel.removeAll();
         componentCheckboxes.clear();
         
-        if (currentComponents.isEmpty()) {
-            JLabel noComponentsLabel = new JLabel("No components found for this section");
+        List<Component> componentsToDisplay = filteredComponents.isEmpty() ? currentComponents : filteredComponents;
+        
+        if (componentsToDisplay.isEmpty()) {
+            String message = subjectFilterCombo != null && subjectFilterCombo.getSelectedIndex() > 0
+                ? "No components found for selected subject"
+                : "No components found for this section";
+            
+            JLabel noComponentsLabel = new JLabel(message);
             noComponentsLabel.setFont(new Font("SansSerif", Font.ITALIC, 14));
             noComponentsLabel.setForeground(ResultLauncherUtils.TEXT_SECONDARY);
             noComponentsLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
@@ -192,32 +275,62 @@ public class ComponentSelectionPanel extends JPanel {
             componentsPanel.add(noComponentsLabel);
             componentsPanel.add(Box.createVerticalGlue());
         } else {
-            // Group components by type
-            Map<String, List<Component>> groupedComponents = groupComponentsByType(currentComponents);
+            // Group components by subject first if showing all
+            String selectedSubject = (String) subjectFilterCombo.getSelectedItem();
+            boolean showingAll = selectedSubject == null || "All Subjects".equals(selectedSubject);
             
-            for (Map.Entry<String, List<Component>> entry : groupedComponents.entrySet()) {
-                String type = entry.getKey();
-                List<Component> typeComponents = entry.getValue();
-                
-                JPanel typeHeaderPanel = createTypeHeader(type, typeComponents.size());
-                componentsPanel.add(typeHeaderPanel);
-                componentsPanel.add(Box.createVerticalStrut(8));
-                
-                for (Component component : typeComponents) {
+            if (showingAll) {
+                // Group by subject
+                for (Map.Entry<String, List<Component>> entry : componentsBySubject.entrySet()) {
+                    String subject = entry.getKey();
+                    List<Component> subjectComps = entry.getValue();
+                    
+                    JPanel subjectHeaderPanel = createSubjectHeader(subject, subjectComps.size());
+                    componentsPanel.add(subjectHeaderPanel);
+                    componentsPanel.add(Box.createVerticalStrut(5));
+                    
+                    for (Component component : subjectComps) {
+                        JPanel componentPanel = createComponentPanel(component);
+                        componentsPanel.add(componentPanel);
+                        componentsPanel.add(Box.createVerticalStrut(3));
+                    }
+                    
+                    componentsPanel.add(Box.createVerticalStrut(10));
+                }
+            } else {
+                // Show single subject components
+                for (Component component : componentsToDisplay) {
                     JPanel componentPanel = createComponentPanel(component);
                     componentsPanel.add(componentPanel);
-                    componentsPanel.add(Box.createVerticalStrut(3));
+                    componentsPanel.add(Box.createVerticalStrut(5));
                 }
-                
-                componentsPanel.add(Box.createVerticalStrut(10));
             }
         }
         
-        selectAllCheckbox.setEnabled(!currentComponents.isEmpty());
+        selectAllCheckbox.setEnabled(!componentsToDisplay.isEmpty());
         updateSelectionCount();
         
         revalidate();
         repaint();
+    }
+    
+    private JPanel createSubjectHeader(String subject, int count) {
+        JPanel panel = new JPanel(new BorderLayout());
+        panel.setOpaque(false);
+        panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 25));
+        
+        JLabel subjectLabel = new JLabel("📚 " + subject);
+        subjectLabel.setFont(new Font("SansSerif", Font.BOLD, 13));
+        subjectLabel.setForeground(ResultLauncherUtils.PRIMARY_COLOR);
+        
+        JLabel countLabel = new JLabel(count + " components");
+        countLabel.setFont(new Font("SansSerif", Font.PLAIN, 11));
+        countLabel.setForeground(ResultLauncherUtils.TEXT_SECONDARY);
+        
+        panel.add(subjectLabel, BorderLayout.WEST);
+        panel.add(countLabel, BorderLayout.EAST);
+        
+        return panel;
     }
     
     private Map<String, List<Component>> groupComponentsByType(List<Component> components) {
@@ -396,5 +509,31 @@ public class ComponentSelectionPanel extends JPanel {
             }
         }
         return selectedComponents;
+    }
+    
+    /**
+     * Preselect components by their IDs (for edit mode).
+     */
+    public void preselectComponents(List<Integer> componentIds) {
+        if (componentIds == null || componentIds.isEmpty()) {
+            return;
+        }
+        
+        Set<Integer> idsToSelect = new HashSet<>(componentIds);
+        int selectedCount = 0;
+        
+        for (Map.Entry<Component, JCheckBox> entry : componentCheckboxes.entrySet()) {
+            if (idsToSelect.contains(entry.getKey().getId())) {
+                entry.getValue().setSelected(true);
+                selectedCount++;
+            } else {
+                entry.getValue().setSelected(false);
+            }
+        }
+        
+        // Update selection count label
+        updateSelectionCount();
+        
+        System.out.println("Preselected " + selectedCount + " components");
     }
 }

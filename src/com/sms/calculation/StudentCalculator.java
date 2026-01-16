@@ -183,13 +183,8 @@ public class StudentCalculator {
     }
 
     private double calculateSGPA(double percentage) {
-        if (percentage >= 90) return 10.0;
-        if (percentage >= 80) return 9.0;
-        if (percentage >= 70) return 8.0;
-        if (percentage >= 60) return 7.0;
-        if (percentage >= 50) return 6.0;
-        if (percentage >= 40) return 5.0;
-        return 0.0;
+        // Calculate CGPA as percentage / 10 (e.g., 94.14% = 9.41 CGPA)
+        return percentage / 10.0;
     }
 
     /**

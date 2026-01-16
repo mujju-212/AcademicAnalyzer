@@ -1309,7 +1309,7 @@ public class SectionAnalyzer extends JPanel {
                 "SELECT DISTINCT sub.subject_name, et.exam_name " +
                 "FROM section_subjects ss " +
                 "INNER JOIN subjects sub ON ss.subject_id = sub.id " +
-                "LEFT JOIN student_marks sm ON sm.subject_id = sub.id " +
+                "LEFT JOIN entered_exam_marks sm ON sm.subject_id = sub.id " +
                 "LEFT JOIN students s ON sm.student_id = s.id AND s.section_id = ss.section_id " +
                 "LEFT JOIN exam_types et ON sm.exam_type_id = et.id " +
                 "WHERE ss.section_id = ? " +
@@ -2320,15 +2320,63 @@ public class SectionAnalyzer extends JPanel {
         subjectNameRow.setBackground(PRIMARY_COLOR);
         subjectNameRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 35));
         
-        // Fixed columns
+        // Fixed columns - Student Info (330 = 50+100+180)
         addHeaderCell(subjectNameRow, "Student Info", 330, PRIMARY_COLOR, Color.WHITE, Font.BOLD, 12, 3);
         
-        // Subject name cells with max marks in brackets (span across exam types + total)
+        // Build column list and widths FIRST to calculate subject header widths
+        List<String> columnList = new ArrayList<>();
+        List<Integer> columnWidths = new ArrayList<>();
+        columnList.add("Rank");
+        columnList.add("Roll No.");
+        columnList.add("Student Name");
+        columnWidths.add(50);
+        columnWidths.add(100);
+        columnWidths.add(180);
+        
+        // Calculate subject widths from actual exam type widths
+        List<Integer> subjectWidths = new ArrayList<>();
         for (AnalyzerDAO.SubjectInfoDetailed subject : rankingData.subjects) {
-            int subjectColSpan = subject.examTypes.size() + 1; // exam types + total
+            System.out.println("@@@ SUBJECT: " + subject.subjectName + 
+                " | examTypeMaxMarks map size: " + subject.examTypeMaxMarks.size() + " @@@");
+            
+            int totalSubjectWidth = 0;
+            for (String examType : subject.examTypes) {
+                Integer examMaxMarks = subject.examTypeMaxMarks.get(examType);
+                System.out.println("@@@ EXAM TYPE DISPLAY: " + examType + 
+                    " | Max Marks: " + examMaxMarks + " @@@");
+                String examHeader = examMaxMarks != null && examMaxMarks > 0 ? 
+                                   examType + " (" + examMaxMarks + ")" : examType;
+                int width = Math.max(calculateTextWidth(examHeader, 10) + 20, 85);
+                columnList.add(examHeader);
+                columnWidths.add(width);
+                totalSubjectWidth += width;
+            }
+            // Total column
+            String totalHeader = "Total";
+            int totalWidth = Math.max(calculateTextWidth(totalHeader, 10) + 20, 85);
+            columnList.add(totalHeader);
+            columnWidths.add(totalWidth);
+            totalSubjectWidth += totalWidth;
+            
+            subjectWidths.add(totalSubjectWidth);
+        }
+        
+        // Overall metrics
+        columnList.add("Overall Total");
+        columnList.add("Percentage");
+        columnList.add("Grade");
+        columnList.add("CGPA");
+        columnWidths.add(85);
+        columnWidths.add(85);
+        columnWidths.add(85);
+        columnWidths.add(85);
+        
+        // Now add subject header cells with calculated widths
+        for (int i = 0; i < rankingData.subjects.size(); i++) {
+            AnalyzerDAO.SubjectInfoDetailed subject = rankingData.subjects.get(i);
             String subjectHeader = subject.subjectName + " (" + subject.maxMarks + ")";
-            int subjectWidth = Math.max(calculateTextWidth(subjectHeader, 12) + 20, subjectColSpan * 85);
-            addHeaderCell(subjectNameRow, subjectHeader, subjectWidth, PRIMARY_COLOR, Color.WHITE, Font.BOLD, 12, subjectColSpan);
+            int subjectColSpan = subject.examTypes.size() + 1;
+            addHeaderCell(subjectNameRow, subjectHeader, subjectWidths.get(i), PRIMARY_COLOR, Color.WHITE, Font.BOLD, 12, subjectColSpan);
         }
         
         addHeaderCell(subjectNameRow, "Overall Metrics", 340, PRIMARY_COLOR, Color.WHITE, Font.BOLD, 12, 4);
@@ -2344,37 +2392,18 @@ public class SectionAnalyzer extends JPanel {
         addHeaderCell(examTypeRow, "Roll No.", 100, PRIMARY_COLOR, Color.WHITE, Font.BOLD, 10, 1);
         addHeaderCell(examTypeRow, "Student Name", 180, PRIMARY_COLOR, Color.WHITE, Font.BOLD, 10, 1);
         
-        // Build column list and widths for data table
-        List<String> columnList = new ArrayList<>();
-        List<Integer> columnWidths = new ArrayList<>();
-        columnList.add("Rank");
-        columnList.add("Roll No.");
-        columnList.add("Student Name");
-        columnWidths.add(50);
-        columnWidths.add(100);
-        columnWidths.add(180);
-        
-        // Exam type columns
+        // Add exam type and total cells (widths already in columnWidths list)
+        int colIdx = 3; // Start after fixed columns
         for (AnalyzerDAO.SubjectInfoDetailed subject : rankingData.subjects) {
-            System.out.println("@@@ SUBJECT: " + subject.subjectName + 
-                " | examTypeMaxMarks map size: " + subject.examTypeMaxMarks.size() + " @@@");
             for (String examType : subject.examTypes) {
-                Integer examMaxMarks = subject.examTypeMaxMarks.get(examType);
-                System.out.println("@@@ EXAM TYPE DISPLAY: " + examType + 
-                    " | Max Marks: " + examMaxMarks + " @@@");
-                String examHeader = examMaxMarks != null && examMaxMarks > 0 ? 
-                                   examType + " (" + examMaxMarks + ")" : examType;
-                int width = Math.max(calculateTextWidth(examHeader, 10) + 20, 85);
+                String examHeader = columnList.get(colIdx);
+                int width = columnWidths.get(colIdx);
                 addHeaderCell(examTypeRow, examHeader, width, PRIMARY_COLOR, Color.WHITE, Font.PLAIN, 10, 1);
-                columnList.add(examHeader);
-                columnWidths.add(width);
+                colIdx++;
             }
             // Total column
-            String totalHeader = "Total";
-            int width = Math.max(calculateTextWidth(totalHeader, 10) + 20, 85);
-            addHeaderCell(examTypeRow, totalHeader, width, PRIMARY_COLOR, Color.WHITE, Font.BOLD, 10, 1);
-            columnList.add(totalHeader);
-            columnWidths.add(width);
+            addHeaderCell(examTypeRow, "Total", columnWidths.get(colIdx), PRIMARY_COLOR, Color.WHITE, Font.BOLD, 10, 1);
+            colIdx++;
         }
         
         // Overall metrics
@@ -2382,14 +2411,6 @@ public class SectionAnalyzer extends JPanel {
         addHeaderCell(examTypeRow, "Percentage", 85, PRIMARY_COLOR, Color.WHITE, Font.BOLD, 10, 1);
         addHeaderCell(examTypeRow, "Grade", 85, PRIMARY_COLOR, Color.WHITE, Font.BOLD, 10, 1);
         addHeaderCell(examTypeRow, "CGPA", 85, PRIMARY_COLOR, Color.WHITE, Font.BOLD, 10, 1);
-        columnList.add("Overall Total");
-        columnList.add("Percentage");
-        columnList.add("Grade");
-        columnList.add("CGPA");
-        columnWidths.add(85);
-        columnWidths.add(85);
-        columnWidths.add(85);
-        columnWidths.add(85);
         
         headerPanel.add(subjectNameRow);
         headerPanel.add(examTypeRow);
