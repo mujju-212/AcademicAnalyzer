@@ -1,6 +1,7 @@
 package com.sms.viewtool;
 
 import com.sms.analyzer.Student;
+import com.sms.dao.AnalyzerDAO;
 import com.sms.dao.SectionDAO;
 import com.sms.dao.StudentDAO;
 import com.sms.database.DatabaseConnection;
@@ -31,6 +32,9 @@ import com.itextpdf.text.PageSize;
 import com.itextpdf.text.Paragraph;
 import com.itextpdf.text.pdf.PdfPTable;
 import com.itextpdf.text.pdf.PdfWriter;
+
+import javax.swing.table.JTableHeader;
+import javax.swing.table.TableCellRenderer;
 
 public class ViewSelectionTool extends JPanel {
 
@@ -119,8 +123,8 @@ public class ViewSelectionTool extends JPanel {
         public StyledCheckBox(String text, boolean selected) {
             super(text, selected);
             setOpaque(false);
-            setFont(new java.awt.Font("Arial", java.awt.Font.PLAIN, 12));
-            setForeground(new Color(50, 50, 50));
+            setFont(new java.awt.Font("SansSerif", java.awt.Font.PLAIN, 12));
+            setForeground(new Color(17, 24, 39)); // TEXT_PRIMARY
             setCursor(new Cursor(Cursor.HAND_CURSOR));
         }
     }
@@ -129,14 +133,31 @@ public class ViewSelectionTool extends JPanel {
     private JComboBox<String> sectionDropdown;
     private JPanel subjectCheckboxPanel;
     private JCheckBox nameCheckBox, rollNumberCheckBox, emailCheckBox, phoneCheckBox, 
-                      sectionCheckBox, totalMarksCheckBox, percentageCheckBox, 
+                      sectionCheckBox, yearCheckBox, semesterCheckBox, totalMarksCheckBox, percentageCheckBox, 
                       sgpaCheckBox, gradeCheckBox, statusCheckBox, rankCheckBox,
                       failedSubjectsCheckBox;
-    private Map<String, JCheckBox> subjectCheckBoxes;
+    // Launched Results components
+    private JComboBox<String> launchedResultsDropdown;
+    private JCheckBox showStudentsCheckBox, showSubjectsCheckBox, showComponentsCheckBox;
+    private Map<String, Set<String>> selectedFilters; // Subject -> Set of exam types
     private RoundedButton showButton, exportExcelButton, exportPdfButton, printButton;
     private JTable resultTable;
     private JScrollPane tableScrollPane;
     private Map<Integer, SectionInfo> sectionInfoMap;
+    private List<ColumnGroup> columnGroups; // For 2-row headers
+    
+    // Inner class for column grouping
+    private static class ColumnGroup {
+        String groupName;
+        int startColumn;
+        int columnCount;
+        
+        ColumnGroup(String groupName, int startColumn, int columnCount) {
+            this.groupName = groupName;
+            this.startColumn = startColumn;
+            this.columnCount = columnCount;
+        }
+    }
 
     public ViewSelectionTool(JFrame parent, HashMap<String, List<Student>> sectionStudents) {
         this(parent, sectionStudents, null);
@@ -146,145 +167,197 @@ public class ViewSelectionTool extends JPanel {
         this.parentFrame = parent;
         this.onCloseCallback = onCloseCallback;
         this.sectionStudents = (sectionStudents != null) ? sectionStudents : new HashMap<>();
-        this.subjectCheckBoxes = new HashMap<>();
+        this.selectedFilters = new HashMap<>();
         this.sectionInfoMap = new HashMap<>();
+        this.columnGroups = new ArrayList<>();
         
         setLayout(new BorderLayout());
         setBackground(new Color(245, 247, 250));
         
         initializeUI();
+        
+        // Load launched results when tool opens
+        loadLaunchedResultsDropdown();
     }
     
 
     private void initializeUI() {
-        // Main container with gradient background
-        JPanel mainContainer = new JPanel(new GridBagLayout()) {
-            @Override
-            protected void paintComponent(Graphics g) {
-                super.paintComponent(g);
-                Graphics2D g2 = (Graphics2D) g;
-                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                
-                GradientPaint gradient = new GradientPaint(
-                    0, 0, new Color(200, 190, 230),
-                    getWidth(), getHeight(), new Color(150, 180, 220)
-                );
-                g2.setPaint(gradient);
-                g2.fillRect(0, 0, getWidth(), getHeight());
-            }
-        };
+        // Main container with desktop app background (no gradient)
+        JPanel mainContainer = new JPanel(new BorderLayout());
+        mainContainer.setBackground(new Color(248, 250, 252)); // BACKGROUND_COLOR from desktop
+        mainContainer.setOpaque(true);
         
-        // White card panel - reduce size
-        RoundedPanel cardPanel = new RoundedPanel(30);
-        cardPanel.setBackground(Color.WHITE);
-        cardPanel.setLayout(new BorderLayout());
-        cardPanel.setPreferredSize(new Dimension(800, 650)); // Reduced from 850
+        // TOP HEADER with title and back button
+        JPanel headerPanel = createHeaderPanel();
+        mainContainer.add(headerPanel, BorderLayout.NORTH);
         
-        // Inner content panel with proper layout
-        JPanel contentPanel = new JPanel();
-        contentPanel.setLayout(new GridBagLayout());
-        contentPanel.setOpaque(false);
-        contentPanel.setBorder(BorderFactory.createEmptyBorder(20, 30, 20, 30)); // Reduced padding
+        // LEFT SIDEBAR for filters (like StudentAnalyzer)
+        JPanel leftSidebar = createFilterSidebar();
+        JScrollPane sidebarScrollPane = new JScrollPane(leftSidebar);
+        sidebarScrollPane.setBorder(null);
+        sidebarScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
+        sidebarScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        sidebarScrollPane.setPreferredSize(new Dimension(320, 0));
+        mainContainer.add(sidebarScrollPane, BorderLayout.WEST);
         
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.fill = GridBagConstraints.HORIZONTAL;
-        gbc.weightx = 1.0;
-        gbc.gridx = 0;
-        gbc.gridy = 0;
-        gbc.insets = new Insets(0, 0, 15, 0); // Reduced from 20
+        // CENTER PANEL for table only
+        JPanel centerPanel = createTablePanel();
+        mainContainer.add(centerPanel, BorderLayout.CENTER);
         
-        // Title panel with close button
-        JPanel titlePanel = new JPanel(new BorderLayout());
-        titlePanel.setOpaque(false);
+        add(mainContainer, BorderLayout.CENTER);
         
-        // Add back button if callback present
+        // Initialize subject checkboxes
+        updateSubjectCheckboxes();
+    }
+    
+    private JPanel createHeaderPanel() {
+        JPanel headerPanel = new JPanel(new BorderLayout());
+        headerPanel.setBackground(Color.WHITE);
+        headerPanel.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(229, 231, 235)),
+            BorderFactory.createEmptyBorder(15, 20, 15, 20)
+        ));
+        
+        // Left side - Back button
+        JPanel leftPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        leftPanel.setOpaque(false);
+        
         if (onCloseCallback != null) {
             JButton backButton = new JButton("← Back");
-            backButton.setFont(new java.awt.Font("Segoe UI", java.awt.Font.PLAIN, 14));
+            backButton.setFont(new java.awt.Font("SansSerif", java.awt.Font.PLAIN, 14));
             backButton.setForeground(new Color(99, 102, 241));
             backButton.setBorderPainted(false);
             backButton.setContentAreaFilled(false);
             backButton.setFocusPainted(false);
             backButton.setCursor(new Cursor(Cursor.HAND_CURSOR));
             backButton.addActionListener(e -> closePanel());
-            titlePanel.add(backButton, BorderLayout.WEST);
+            leftPanel.add(backButton);
         }
         
+        // Center - Title
         JLabel titleLabel = new JLabel("View Student Data");
-        titleLabel.setFont(new java.awt.Font("Arial", java.awt.Font.BOLD, 24)); // Reduced from 28
-        titleLabel.setForeground(new Color(30, 30, 30));
+        titleLabel.setFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, 20));
+        titleLabel.setForeground(new Color(17, 24, 39));
+        titleLabel.setHorizontalAlignment(SwingConstants.CENTER);
         
-        JButton closeButton = new JButton("✕");
-        closeButton.setFont(new java.awt.Font("Arial", java.awt.Font.PLAIN, 20));
-        closeButton.setForeground(new Color(100, 100, 100));
+        // Right side - Close button
+        JPanel rightPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+        rightPanel.setOpaque(false);
+        
+        JButton closeButton = new JButton("×");
+        closeButton.setFont(new java.awt.Font("SansSerif", java.awt.Font.PLAIN, 24));
+        closeButton.setForeground(new Color(75, 85, 99));
         closeButton.setBorderPainted(false);
         closeButton.setContentAreaFilled(false);
         closeButton.setFocusPainted(false);
         closeButton.setCursor(new Cursor(Cursor.HAND_CURSOR));
         closeButton.addActionListener(e -> closePanel());
+        rightPanel.add(closeButton);
         
-        titlePanel.add(titleLabel, BorderLayout.CENTER);
-        titlePanel.add(closeButton, BorderLayout.EAST);
-        contentPanel.add(titlePanel, gbc);
+        headerPanel.add(leftPanel, BorderLayout.WEST);
+        headerPanel.add(titleLabel, BorderLayout.CENTER);
+        headerPanel.add(rightPanel, BorderLayout.EAST);
         
-        // Section selection panel
-        gbc.gridy++;
-        gbc.insets = new Insets(0, 0, 8, 0); // Reduced
+        return headerPanel;
+    }
+    
+    private JPanel createFilterSidebar() {
+        JPanel sidebar = new JPanel();
+        sidebar.setLayout(new BoxLayout(sidebar, BoxLayout.Y_AXIS));
+        sidebar.setBackground(Color.WHITE);
+        sidebar.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 0, 0, 1, new Color(229, 231, 235)),
+            BorderFactory.createEmptyBorder(20, 10, 20, 10)
+        ));
+        
+        // Title
+        JLabel filterTitle = new JLabel("Filters");
+        filterTitle.setFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, 18));
+        filterTitle.setForeground(new Color(17, 24, 39));
+        filterTitle.setAlignmentX(Component.LEFT_ALIGNMENT);
+        sidebar.add(filterTitle);
+        sidebar.add(Box.createVerticalStrut(15));
+        
+        // Section selector
         JLabel sectionLabel = new JLabel("Select Section");
-        sectionLabel.setFont(new java.awt.Font("Arial", java.awt.Font.BOLD, 14)); // Reduced from 16
-        sectionLabel.setForeground(new Color(50, 50, 50));
-        contentPanel.add(sectionLabel, gbc);
+        sectionLabel.setFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, 13));
+        sectionLabel.setForeground(new Color(17, 24, 39));
+        sectionLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        sidebar.add(sectionLabel);
+        sidebar.add(Box.createVerticalStrut(8));
         
-        // Section dropdown
-        gbc.gridy++;
-        gbc.insets = new Insets(0, 0, 15, 0); // Reduced
         Vector<String> sections = new Vector<>();
         sections.add("All Sections");
-        
-        // Load sections from database
         loadSectionInfo();
-        
-        // Debug: Check section dropdown data
-        System.out.println("\n=== DROPDOWN SECTION DEBUG ===");
-        System.out.println("Available sections in sectionStudents map: " + sectionStudents.keySet());
-        
-        // Add section names from sectionStudents map (these are the ones that have data)
         sections.addAll(sectionStudents.keySet());
-        System.out.println("Dropdown will show: " + sections);
         
         sectionDropdown = new JComboBox<>(sections);
-        sectionDropdown.setFont(new java.awt.Font("Arial", java.awt.Font.PLAIN, 13)); // Reduced
-        sectionDropdown.setPreferredSize(new Dimension(0, 40)); // Reduced from 45
+        sectionDropdown.setFont(new java.awt.Font("SansSerif", java.awt.Font.PLAIN, 13));
+        sectionDropdown.setMaximumSize(new Dimension(Integer.MAX_VALUE, 38));
         sectionDropdown.setBackground(Color.WHITE);
         sectionDropdown.setBorder(BorderFactory.createCompoundBorder(
             BorderFactory.createLineBorder(new Color(200, 200, 200), 1),
-            BorderFactory.createEmptyBorder(6, 10, 6, 10) // Reduced padding
+            BorderFactory.createEmptyBorder(6, 10, 6, 10)
         ));
-        contentPanel.add(sectionDropdown, gbc);
+        sectionDropdown.setAlignmentX(Component.LEFT_ALIGNMENT);
+        sidebar.add(sectionDropdown);
+        sidebar.add(Box.createVerticalStrut(20));
         
-        // Fields selection label
-        gbc.gridy++;
-        gbc.insets = new Insets(0, 0, 8, 0);
-        JLabel fieldsLabel = new JLabel("Select Fields");
-        fieldsLabel.setFont(new java.awt.Font("Arial", java.awt.Font.BOLD, 14)); // Reduced
-        fieldsLabel.setForeground(new Color(50, 50, 50));
-        contentPanel.add(fieldsLabel, gbc);
+        // Subject & Exam Type Filter
+        JLabel filterLabel = new JLabel("Subject & Exam Type Filter");
+        filterLabel.setFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, 13));
+        filterLabel.setForeground(new Color(17, 24, 39));
+        filterLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        sidebar.add(filterLabel);
+        sidebar.add(Box.createVerticalStrut(8));
         
-        // Create a scrollable panel for all checkboxes
-        JPanel allFieldsPanel = new JPanel();
-        allFieldsPanel.setLayout(new BoxLayout(allFieldsPanel, BoxLayout.Y_AXIS));
-        allFieldsPanel.setOpaque(false);
+        // Subject checkbox panel (hierarchical tree)
+        subjectCheckboxPanel = new JPanel(new BorderLayout());
+        subjectCheckboxPanel.setBackground(Color.WHITE);
+        subjectCheckboxPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        subjectCheckboxPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 300));
+        subjectCheckboxPanel.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(229, 231, 235), 1),
+            BorderFactory.createEmptyBorder(5, 5, 5, 5)
+        ));
+        sidebar.add(subjectCheckboxPanel);
         
-        // Student Info checkboxes panel
-        JPanel studentInfoPanel = new JPanel(new GridLayout(2, 3, 8, 8)); // Reduced spacing
-        studentInfoPanel.setOpaque(false);
-        studentInfoPanel.setBorder(BorderFactory.createTitledBorder(
-            BorderFactory.createLineBorder(new Color(200, 200, 200)), 
-            "Student Information",
-            TitledBorder.LEFT,
-            TitledBorder.TOP,
-            new java.awt.Font("Arial", java.awt.Font.BOLD, 11), // Reduced
-            new Color(100, 100, 100)
+        // Add listener to update filter when section changes
+        sectionDropdown.addActionListener(e -> {
+            updateSubjectCheckboxes();
+        });
+        
+        sidebar.add(Box.createVerticalStrut(20));
+        
+        // Student Information Checkboxes
+        JPanel studentInfoHeader = new JPanel(new BorderLayout());
+        studentInfoHeader.setBackground(Color.WHITE);
+        studentInfoHeader.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
+        studentInfoHeader.setBorder(BorderFactory.createEmptyBorder(0, 0, 5, 0));
+        studentInfoHeader.setAlignmentX(Component.LEFT_ALIGNMENT);
+        
+        JLabel studentInfoLabel = new JLabel("Student Information");
+        studentInfoLabel.setFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, 13));
+        studentInfoLabel.setForeground(new Color(17, 24, 39));
+        
+        JCheckBox selectAllStudentInfo = new JCheckBox("All", true);
+        selectAllStudentInfo.setFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, 11));
+        selectAllStudentInfo.setBackground(Color.WHITE);
+        selectAllStudentInfo.setForeground(new Color(99, 102, 241));
+        selectAllStudentInfo.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        
+        studentInfoHeader.add(studentInfoLabel, BorderLayout.WEST);
+        studentInfoHeader.add(selectAllStudentInfo, BorderLayout.EAST);
+        sidebar.add(studentInfoHeader);
+        sidebar.add(Box.createVerticalStrut(8));
+        
+        JPanel studentInfoPanel = new JPanel();
+        studentInfoPanel.setLayout(new BoxLayout(studentInfoPanel, BoxLayout.Y_AXIS));
+        studentInfoPanel.setBackground(Color.WHITE);
+        studentInfoPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        studentInfoPanel.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(229, 231, 235), 1),
+            BorderFactory.createEmptyBorder(8, 8, 8, 8)
         ));
         
         nameCheckBox = new StyledCheckBox("Name", true);
@@ -292,26 +365,70 @@ public class ViewSelectionTool extends JPanel {
         emailCheckBox = new StyledCheckBox("Email", false);
         phoneCheckBox = new StyledCheckBox("Phone", false);
         sectionCheckBox = new StyledCheckBox("Section", true);
+        yearCheckBox = new StyledCheckBox("Year", true);
+        semesterCheckBox = new StyledCheckBox("Semester", true);
+        
+        nameCheckBox.setAlignmentX(Component.LEFT_ALIGNMENT);
+        rollNumberCheckBox.setAlignmentX(Component.LEFT_ALIGNMENT);
+        emailCheckBox.setAlignmentX(Component.LEFT_ALIGNMENT);
+        phoneCheckBox.setAlignmentX(Component.LEFT_ALIGNMENT);
+        sectionCheckBox.setAlignmentX(Component.LEFT_ALIGNMENT);
+        yearCheckBox.setAlignmentX(Component.LEFT_ALIGNMENT);
+        semesterCheckBox.setAlignmentX(Component.LEFT_ALIGNMENT);
         
         studentInfoPanel.add(nameCheckBox);
         studentInfoPanel.add(rollNumberCheckBox);
         studentInfoPanel.add(emailCheckBox);
         studentInfoPanel.add(phoneCheckBox);
         studentInfoPanel.add(sectionCheckBox);
+        studentInfoPanel.add(yearCheckBox);
+        studentInfoPanel.add(semesterCheckBox);
         
-        allFieldsPanel.add(studentInfoPanel);
-        allFieldsPanel.add(Box.createVerticalStrut(10));
+        // Add Select All listener
+        selectAllStudentInfo.addActionListener(e -> {
+            boolean selected = selectAllStudentInfo.isSelected();
+            nameCheckBox.setSelected(selected);
+            rollNumberCheckBox.setSelected(selected);
+            emailCheckBox.setSelected(selected);
+            phoneCheckBox.setSelected(selected);
+            sectionCheckBox.setSelected(selected);
+            yearCheckBox.setSelected(selected);
+            semesterCheckBox.setSelected(selected);
+        });
         
-        // Academic fields checkboxes panel
-        JPanel academicPanel = new JPanel(new GridLayout(2, 4, 8, 8)); // Reduced spacing
-        academicPanel.setOpaque(false);
-        academicPanel.setBorder(BorderFactory.createTitledBorder(
-            BorderFactory.createLineBorder(new Color(200, 200, 200)), 
-            "Academic Information",
-            TitledBorder.LEFT,
-            TitledBorder.TOP,
-            new java.awt.Font("Arial", java.awt.Font.BOLD, 11), // Reduced
-            new Color(100, 100, 100)
+        studentInfoPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 180));
+        sidebar.add(studentInfoPanel);
+        sidebar.add(Box.createVerticalStrut(15));
+        
+        // Academic Information Checkboxes
+        JPanel academicInfoHeader = new JPanel(new BorderLayout());
+        academicInfoHeader.setBackground(Color.WHITE);
+        academicInfoHeader.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
+        academicInfoHeader.setBorder(BorderFactory.createEmptyBorder(0, 0, 5, 0));
+        academicInfoHeader.setAlignmentX(Component.LEFT_ALIGNMENT);
+        
+        JLabel academicInfoLabel = new JLabel("Academic Information");
+        academicInfoLabel.setFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, 13));
+        academicInfoLabel.setForeground(new Color(17, 24, 39));
+        
+        JCheckBox selectAllAcademicInfo = new JCheckBox("All", true);
+        selectAllAcademicInfo.setFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, 11));
+        selectAllAcademicInfo.setBackground(Color.WHITE);
+        selectAllAcademicInfo.setForeground(new Color(99, 102, 241));
+        selectAllAcademicInfo.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        
+        academicInfoHeader.add(academicInfoLabel, BorderLayout.WEST);
+        academicInfoHeader.add(selectAllAcademicInfo, BorderLayout.EAST);
+        sidebar.add(academicInfoHeader);
+        sidebar.add(Box.createVerticalStrut(8));
+        
+        JPanel academicInfoPanel = new JPanel();
+        academicInfoPanel.setLayout(new BoxLayout(academicInfoPanel, BoxLayout.Y_AXIS));
+        academicInfoPanel.setBackground(Color.WHITE);
+        academicInfoPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        academicInfoPanel.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(229, 231, 235), 1),
+            BorderFactory.createEmptyBorder(8, 8, 8, 8)
         ));
         
         totalMarksCheckBox = new StyledCheckBox("Total Marks", true);
@@ -322,114 +439,189 @@ public class ViewSelectionTool extends JPanel {
         rankCheckBox = new StyledCheckBox("Rank", false);
         failedSubjectsCheckBox = new StyledCheckBox("Failed Subjects", false);
         
-        academicPanel.add(totalMarksCheckBox);
-        academicPanel.add(percentageCheckBox);
-        academicPanel.add(sgpaCheckBox);
-        academicPanel.add(gradeCheckBox);
-        academicPanel.add(statusCheckBox);
-        academicPanel.add(rankCheckBox);
-        academicPanel.add(failedSubjectsCheckBox);
+        totalMarksCheckBox.setAlignmentX(Component.LEFT_ALIGNMENT);
+        percentageCheckBox.setAlignmentX(Component.LEFT_ALIGNMENT);
+        sgpaCheckBox.setAlignmentX(Component.LEFT_ALIGNMENT);
+        gradeCheckBox.setAlignmentX(Component.LEFT_ALIGNMENT);
+        statusCheckBox.setAlignmentX(Component.LEFT_ALIGNMENT);
+        rankCheckBox.setAlignmentX(Component.LEFT_ALIGNMENT);
+        failedSubjectsCheckBox.setAlignmentX(Component.LEFT_ALIGNMENT);
         
-        allFieldsPanel.add(academicPanel);
-        allFieldsPanel.add(Box.createVerticalStrut(10));
+        academicInfoPanel.add(totalMarksCheckBox);
+        academicInfoPanel.add(percentageCheckBox);
+        academicInfoPanel.add(sgpaCheckBox);
+        academicInfoPanel.add(gradeCheckBox);
+        academicInfoPanel.add(statusCheckBox);
+        academicInfoPanel.add(rankCheckBox);
+        academicInfoPanel.add(failedSubjectsCheckBox);
         
-        // Subject checkboxes panel
-        subjectCheckboxPanel = new JPanel(new GridBagLayout());
-        subjectCheckboxPanel.setOpaque(false);
-        subjectCheckboxPanel.setBorder(BorderFactory.createTitledBorder(
-            BorderFactory.createLineBorder(new Color(200, 200, 200)), 
-            "Subject Marks",
-            TitledBorder.LEFT,
-            TitledBorder.TOP,
-            new java.awt.Font("Arial", java.awt.Font.BOLD, 11), // Reduced
-            new Color(100, 100, 100)
+        // Add Select All listener
+        selectAllAcademicInfo.addActionListener(e -> {
+            boolean selected = selectAllAcademicInfo.isSelected();
+            totalMarksCheckBox.setSelected(selected);
+            percentageCheckBox.setSelected(selected);
+            sgpaCheckBox.setSelected(selected);
+            gradeCheckBox.setSelected(selected);
+            statusCheckBox.setSelected(selected);
+            rankCheckBox.setSelected(selected);
+            failedSubjectsCheckBox.setSelected(selected);
+        });
+        
+        academicInfoPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 180));
+        sidebar.add(academicInfoPanel);
+        sidebar.add(Box.createVerticalStrut(15));
+        
+        // Launched Results Section
+        JLabel launchedResultsLabel = new JLabel("Launched Results");
+        launchedResultsLabel.setFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, 13));
+        launchedResultsLabel.setForeground(new Color(17, 24, 39));
+        launchedResultsLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        sidebar.add(launchedResultsLabel);
+        sidebar.add(Box.createVerticalStrut(8));
+        
+        JPanel launchedResultsPanel = new JPanel();
+        launchedResultsPanel.setLayout(new BoxLayout(launchedResultsPanel, BoxLayout.Y_AXIS));
+        launchedResultsPanel.setBackground(Color.WHITE);
+        launchedResultsPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        launchedResultsPanel.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(229, 231, 235), 1),
+            BorderFactory.createEmptyBorder(8, 8, 8, 8)
         ));
-        allFieldsPanel.add(subjectCheckboxPanel);
         
-        // Add scrollable fields panel
-        gbc.gridy++;
-        gbc.insets = new Insets(0, 0, 15, 0);
-        gbc.weighty = 0.3; // Give some weight for scrolling
-        gbc.fill = GridBagConstraints.BOTH;
+        // Dropdown to select launched result
+        JLabel selectLaunchLabel = new JLabel("Select Launch:");
+        selectLaunchLabel.setFont(new java.awt.Font("SansSerif", java.awt.Font.PLAIN, 11));
+        selectLaunchLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        launchedResultsPanel.add(selectLaunchLabel);
+        launchedResultsPanel.add(Box.createVerticalStrut(4));
         
-        JScrollPane fieldsScrollPane = new JScrollPane(allFieldsPanel);
-        fieldsScrollPane.setBorder(null);
-        fieldsScrollPane.setPreferredSize(new Dimension(0, 180)); // Fixed height
-        fieldsScrollPane.getViewport().setBackground(Color.WHITE);
-        contentPanel.add(fieldsScrollPane, gbc);
+        launchedResultsDropdown = new JComboBox<>();
+        launchedResultsDropdown.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
+        launchedResultsDropdown.setAlignmentX(Component.LEFT_ALIGNMENT);
+        launchedResultsDropdown.setBackground(Color.WHITE);
+        launchedResultsPanel.add(launchedResultsDropdown);
+        launchedResultsPanel.add(Box.createVerticalStrut(8));
         
-        // Show button - centered
-        gbc.gridy++;
-        gbc.fill = GridBagConstraints.NONE;
-        gbc.weighty = 0;
-        gbc.anchor = GridBagConstraints.CENTER;
-        gbc.insets = new Insets(0, 0, 15, 0);
-        showButton = new RoundedButton("Show Data", 20, // Reduced radius
-            new Color(66, 133, 244), new Color(50, 110, 220));
-        showButton.setFont(new java.awt.Font("Arial", java.awt.Font.BOLD, 14)); // Reduced
+        // Add listener to deselect Student/Academic info when launched result is selected
+        launchedResultsDropdown.addActionListener(e -> {
+            if (launchedResultsDropdown.getSelectedIndex() > 0) {
+                // Deselect all Student Information checkboxes
+                nameCheckBox.setSelected(false);
+                rollNumberCheckBox.setSelected(false);
+                emailCheckBox.setSelected(false);
+                phoneCheckBox.setSelected(false);
+                sectionCheckBox.setSelected(false);
+                yearCheckBox.setSelected(false);
+                semesterCheckBox.setSelected(false);
+                
+                // Deselect all Academic Information checkboxes
+                totalMarksCheckBox.setSelected(false);
+                percentageCheckBox.setSelected(false);
+                sgpaCheckBox.setSelected(false);
+                gradeCheckBox.setSelected(false);
+                statusCheckBox.setSelected(false);
+                rankCheckBox.setSelected(false);
+                failedSubjectsCheckBox.setSelected(false);
+            }
+        });
+        
+        // Load launched results into dropdown
+        loadLaunchedResultsDropdown();
+        
+        JLabel includeLabel = new JLabel("Include in Export:");
+        includeLabel.setFont(new java.awt.Font("SansSerif", java.awt.Font.PLAIN, 11));
+        includeLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        launchedResultsPanel.add(includeLabel);
+        launchedResultsPanel.add(Box.createVerticalStrut(4));
+        
+        showStudentsCheckBox = new StyledCheckBox("Student Details", true);
+        showSubjectsCheckBox = new StyledCheckBox("Subject Marks", true);
+        showComponentsCheckBox = new StyledCheckBox("Component Breakdown", false);
+        
+        showStudentsCheckBox.setAlignmentX(Component.LEFT_ALIGNMENT);
+        showSubjectsCheckBox.setAlignmentX(Component.LEFT_ALIGNMENT);
+        showComponentsCheckBox.setAlignmentX(Component.LEFT_ALIGNMENT);
+        
+        launchedResultsPanel.add(showStudentsCheckBox);
+        launchedResultsPanel.add(showSubjectsCheckBox);
+        launchedResultsPanel.add(showComponentsCheckBox);
+        
+        launchedResultsPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 200));
+        sidebar.add(launchedResultsPanel);
+        sidebar.add(Box.createVerticalStrut(20));
+        
+        // Show Data Button at bottom of sidebar
+        showButton = new RoundedButton("Show Data", 12,
+            new Color(99, 102, 241), new Color(79, 82, 221));
+        showButton.setFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, 14));
         showButton.setForeground(Color.WHITE);
-        showButton.setPreferredSize(new Dimension(130, 40)); // Reduced
-        contentPanel.add(showButton, gbc);
+        showButton.setMaximumSize(new Dimension(Integer.MAX_VALUE, 40));
+        showButton.setAlignmentX(Component.LEFT_ALIGNMENT);
+        showButton.addActionListener(e -> displaySelectedData());
+        sidebar.add(showButton);
         
-        // Table panel
-        gbc.gridy++;
-        gbc.fill = GridBagConstraints.BOTH;
-        gbc.weighty = 1.0;
-        gbc.anchor = GridBagConstraints.CENTER;
-        gbc.insets = new Insets(0, 0, 15, 0);
+        sidebar.add(Box.createVerticalGlue());
         
+        return sidebar;
+    }
+    
+    private JPanel createTablePanel() {
         JPanel tablePanel = new JPanel(new BorderLayout());
-        tablePanel.setOpaque(false);
-        tablePanel.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(new Color(200, 200, 200), 1),
-            BorderFactory.createEmptyBorder(1, 1, 1, 1)
+        tablePanel.setBackground(Color.WHITE);
+        tablePanel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+        
+        // Create table container
+        JPanel tableContainer = new JPanel(new BorderLayout());
+        tableContainer.setBackground(Color.WHITE);
+        tableContainer.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(229, 231, 235), 1),
+            BorderFactory.createEmptyBorder(10, 10, 10, 10)
         ));
         
-        // Create table with custom styling
+        // Create table
         resultTable = new JTable();
-        resultTable.setRowHeight(30); // Reduced from 35
-        resultTable.setFont(new java.awt.Font("Arial", java.awt.Font.PLAIN, 12)); // Reduced
-        resultTable.setGridColor(new Color(230, 230, 230));
+        resultTable.setRowHeight(30);
+        resultTable.setFont(new java.awt.Font("SansSerif", java.awt.Font.PLAIN, 12));
+        resultTable.setGridColor(new Color(229, 231, 235));
         resultTable.setShowGrid(true);
         resultTable.setIntercellSpacing(new Dimension(1, 1));
+        resultTable.setAutoResizeMode(JTable.AUTO_RESIZE_OFF); // Enable horizontal scrolling
         
         // Style table header
         JTableHeader header = resultTable.getTableHeader();
-        header.setFont(new java.awt.Font("Arial", java.awt.Font.BOLD, 12)); // Reduced
-        header.setBackground(new Color(245, 245, 245));
-        header.setForeground(new Color(50, 50, 50));
-        header.setBorder(BorderFactory.createLineBorder(new Color(200, 200, 200)));
+        header.setFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, 12));
+        header.setBackground(new Color(248, 250, 252));
+        header.setForeground(new Color(17, 24, 39));
+        header.setBorder(BorderFactory.createLineBorder(new Color(229, 231, 235)));
         
         tableScrollPane = new JScrollPane(resultTable);
         tableScrollPane.setBorder(null);
-        tablePanel.add(tableScrollPane, BorderLayout.CENTER);
-        contentPanel.add(tablePanel, gbc);
+        tableScrollPane.getViewport().setBackground(Color.WHITE);
+        tableScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+        tableScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
+        tableContainer.add(tableScrollPane, BorderLayout.CENTER);
         
-        // Export buttons panel - centered
-        gbc.gridy++;
-        gbc.fill = GridBagConstraints.NONE;
-        gbc.weighty = 0;
-        gbc.anchor = GridBagConstraints.CENTER;
-        gbc.insets = new Insets(0, 0, 0, 0);
+        tablePanel.add(tableContainer, BorderLayout.CENTER);
         
-        JPanel exportPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 8, 0));
-        exportPanel.setOpaque(false);
+        // Export buttons at bottom
+        JPanel exportPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 10));
+        exportPanel.setBackground(Color.WHITE);
         
-        exportExcelButton = new RoundedButton("Export Excel", 20,
-            new Color(52, 168, 83), new Color(40, 140, 70));
-        exportExcelButton.setFont(new java.awt.Font("Arial", java.awt.Font.BOLD, 12)); // Reduced
+        exportExcelButton = new RoundedButton("Export Excel", 12,
+            new Color(34, 197, 94), new Color(22, 163, 74)); // SUCCESS_COLOR from desktop
+        exportExcelButton.setFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, 12));
         exportExcelButton.setForeground(Color.WHITE);
         exportExcelButton.setPreferredSize(new Dimension(110, 35)); // Reduced
         
-        exportPdfButton = new RoundedButton("Export PDF", 20,
-            new Color(220, 53, 69), new Color(200, 35, 51));
-        exportPdfButton.setFont(new java.awt.Font("Arial", java.awt.Font.BOLD, 12)); // Reduced
+        exportPdfButton = new RoundedButton("Export PDF", 12,
+            new Color(220, 53, 69), new Color(185, 28, 28)); // ERROR_COLOR from desktop
+        exportPdfButton.setFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, 12));
         exportPdfButton.setForeground(Color.WHITE);
         exportPdfButton.setPreferredSize(new Dimension(110, 35)); // Reduced
         
-        printButton = new RoundedButton("Print", 20,
-            new Color(255, 193, 7), new Color(235, 173, 0));
-        printButton.setFont(new java.awt.Font("Arial", java.awt.Font.BOLD, 12)); // Reduced
+        printButton = new RoundedButton("Print", 12,
+            new Color(251, 191, 36), new Color(245, 158, 11)); // WARNING_COLOR from desktop
+        printButton.setFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, 12));
         printButton.setForeground(Color.WHITE);
         printButton.setPreferredSize(new Dimension(80, 35)); // Reduced
         
@@ -437,34 +629,14 @@ public class ViewSelectionTool extends JPanel {
         exportPanel.add(exportPdfButton);
         exportPanel.add(printButton);
         
-        contentPanel.add(exportPanel, gbc);
+        tablePanel.add(exportPanel, BorderLayout.SOUTH);
         
-        // Make the content scrollable
-        JScrollPane contentScrollPane = new JScrollPane(contentPanel);
-        contentScrollPane.setBorder(null);
-        contentScrollPane.getVerticalScrollBar().setUnitIncrement(16);
-        cardPanel.add(contentScrollPane, BorderLayout.CENTER);
-        
-        // Add card panel to main container
-        GridBagConstraints mainGbc = new GridBagConstraints();
-        mainGbc.gridx = 0;
-        mainGbc.gridy = 0;
-        mainContainer.add(cardPanel, mainGbc);
-        
-        add(mainContainer, BorderLayout.CENTER);
-        
-        // Add listeners
-        sectionDropdown.addActionListener(e -> updateSubjectCheckboxes());
-        showButton.addActionListener(e -> displaySelectedData());
+        // Add listeners for export buttons
         exportExcelButton.addActionListener(e -> exportToExcel());
         exportPdfButton.addActionListener(e -> exportToPdf());
         printButton.addActionListener(e -> printTable());
         
-        // Initialize subject checkboxes
-        updateSubjectCheckboxes();
-        
-        // Make dialog draggable
-        addDragFunctionality(cardPanel);
+        return tablePanel;
     }
     
     
@@ -479,6 +651,43 @@ public class ViewSelectionTool extends JPanel {
             }
         } catch (Exception e) {
             e.printStackTrace();
+        }
+    }
+    
+    private void loadLaunchedResultsDropdown() {
+        launchedResultsDropdown.removeAllItems();
+        launchedResultsDropdown.addItem("-- Select Launched Result --");
+        
+        // Query ALL launched results (independent of section selection)
+        try (Connection conn = DatabaseConnection.getConnection()) {
+            String query = "SELECT launch_id, MIN(created_at) as launch_date, COUNT(DISTINCT student_id) as student_count " +
+                          "FROM launched_student_results " +
+                          "GROUP BY launch_id " +
+                          "ORDER BY launch_date DESC";
+            
+            try (PreparedStatement stmt = conn.prepareStatement(query)) {
+                ResultSet rs = stmt.executeQuery();
+                
+                java.text.SimpleDateFormat dateFormat = new java.text.SimpleDateFormat("dd-MMM-yyyy hh:mm a");
+                
+                while (rs.next()) {
+                    int launchId = rs.getInt("launch_id");
+                    java.sql.Timestamp launchDate = rs.getTimestamp("launch_date");
+                    int studentCount = rs.getInt("student_count");
+                    
+                    String displayText = String.format("#%d - %s (%d students)", 
+                        launchId, 
+                        dateFormat.format(launchDate),
+                        studentCount);
+                    
+                    launchedResultsDropdown.addItem(displayText);
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            JOptionPane.showMessageDialog(this, 
+                "Error loading launched results: " + e.getMessage(), 
+                "Error", JOptionPane.ERROR_MESSAGE);
         }
     }
     
@@ -505,66 +714,280 @@ public class ViewSelectionTool extends JPanel {
     
     private void updateSubjectCheckboxes() {
         subjectCheckboxPanel.removeAll();
-        subjectCheckBoxes.clear();
+        selectedFilters.clear();
         
         String selectedSection = (String) sectionDropdown.getSelectedItem();
-        System.out.println("Selected section: " + selectedSection); // Debug
+        System.out.println("Selected section: " + selectedSection);
         
-        if (selectedSection != null) {
-            Set<String> allSubjects = new HashSet<>();
+        if (selectedSection == null || selectedSection.equals("All Sections")) {
+            JLabel infoLabel = new JLabel("Please select a specific section to view exam filters");
+            infoLabel.setFont(new java.awt.Font("SansSerif", java.awt.Font.ITALIC, 12));
+            infoLabel.setForeground(Color.GRAY);
+            subjectCheckboxPanel.add(infoLabel, BorderLayout.CENTER);
+            subjectCheckboxPanel.revalidate();
+            subjectCheckboxPanel.repaint();
+            return;
+        }
+        
+        // Get section ID
+        int sectionId = getSectionIdByName(selectedSection);
+        if (sectionId <= 0) {
+            JLabel errorLabel = new JLabel("Section not found in database");
+            errorLabel.setForeground(Color.RED);
+            subjectCheckboxPanel.add(errorLabel, BorderLayout.CENTER);
+            subjectCheckboxPanel.revalidate();
+            subjectCheckboxPanel.repaint();
+            return;
+        }
+        
+        // Create hierarchical filter tree
+        JPanel treePanel = new JPanel();
+        treePanel.setLayout(new BoxLayout(treePanel, BoxLayout.Y_AXIS));
+        treePanel.setBackground(Color.WHITE);
+        treePanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        
+        // Query database for subjects and exam types
+        Map<String, List<String>> subjectExamTypes = getSubjectExamTypesForSection(sectionId);
+        
+        if (subjectExamTypes.isEmpty()) {
+            JLabel noDataLabel = new JLabel("No exam patterns configured for this section");
+            noDataLabel.setFont(new java.awt.Font("SansSerif", java.awt.Font.ITALIC, 12));
+            noDataLabel.setForeground(Color.GRAY);
+            treePanel.add(noDataLabel);
+        } else {
+            // Overall checkbox
+            JCheckBox overallCheck = new JCheckBox("Overall (All)", true);
+            overallCheck.setFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, 14));
+            overallCheck.setBackground(Color.WHITE);
+            overallCheck.setAlignmentX(Component.LEFT_ALIGNMENT);
             
-            if (selectedSection.equals("All Sections")) {
-                // Get all unique subjects from all sections
-                for (Map.Entry<String, List<Student>> entry : sectionStudents.entrySet()) {
-                    System.out.println("Section: " + entry.getKey() + ", Students: " + entry.getValue().size()); // Debug
-                    List<Student> students = entry.getValue();
-                    if (!students.isEmpty()) {
-                        Student firstStudent = students.get(0);
-                        System.out.println("First student marks: " + firstStudent.getMarks()); // Debug
-                        allSubjects.addAll(firstStudent.getMarks().keySet());
+            java.util.List<JCheckBox> allCheckboxes = new java.util.ArrayList<>();
+            
+            treePanel.add(overallCheck);
+            treePanel.add(Box.createVerticalStrut(10));
+            treePanel.add(new JSeparator());
+            treePanel.add(Box.createVerticalStrut(10));
+            
+            // Subject and exam type checkboxes
+            for (Map.Entry<String, List<String>> entry : subjectExamTypes.entrySet()) {
+                String subject = entry.getKey();
+                List<String> examTypes = entry.getValue();
+                
+                // Subject checkbox
+                JCheckBox subjectCheck = new JCheckBox("+ " + subject, selectedFilters.containsKey(subject));
+                subjectCheck.setFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, 13));
+                subjectCheck.setForeground(new Color(17, 24, 39)); // TEXT_PRIMARY
+                subjectCheck.setBackground(Color.WHITE);
+                subjectCheck.setAlignmentX(Component.LEFT_ALIGNMENT);
+                allCheckboxes.add(subjectCheck);
+                
+                java.util.List<JCheckBox> examChecks = new java.util.ArrayList<>();
+                
+                subjectCheck.addActionListener(e -> {
+                    boolean selected = subjectCheck.isSelected();
+                    for (JCheckBox examCheck : examChecks) {
+                        examCheck.setSelected(selected);
                     }
+                    
+                    if (selected) {
+                        selectedFilters.put(subject, new HashSet<>(examTypes));
+                    } else {
+                        selectedFilters.remove(subject);
+                    }
+                    overallCheck.setSelected(isAllSelected(subjectExamTypes));
+                });
+                
+                treePanel.add(subjectCheck);
+                
+                // Exam type checkboxes (indented)
+                for (String examType : examTypes) {
+                    boolean examSelected = selectedFilters.containsKey(subject) && 
+                                         selectedFilters.get(subject).contains(examType);
+                    
+                    JCheckBox examCheck = new JCheckBox("   - " + examType, examSelected);
+                    examCheck.setFont(new java.awt.Font("SansSerif", java.awt.Font.PLAIN, 12));
+                    examCheck.setBackground(Color.WHITE);
+                    examCheck.setAlignmentX(Component.LEFT_ALIGNMENT);
+                    examChecks.add(examCheck);
+                    allCheckboxes.add(examCheck);
+                    
+                    examCheck.addActionListener(e -> {
+                        if (examCheck.isSelected()) {
+                            selectedFilters.putIfAbsent(subject, new HashSet<>());
+                            selectedFilters.get(subject).add(examType);
+                        } else {
+                            if (selectedFilters.containsKey(subject)) {
+                                selectedFilters.get(subject).remove(examType);
+                                if (selectedFilters.get(subject).isEmpty()) {
+                                    selectedFilters.remove(subject);
+                                }
+                            }
+                        }
+                        
+                        // Update subject checkbox
+                        boolean allSelected = examChecks.stream().allMatch(JCheckBox::isSelected);
+                        subjectCheck.setSelected(allSelected);
+                        overallCheck.setSelected(isAllSelected(subjectExamTypes));
+                    });
+                    
+                    treePanel.add(examCheck);
                 }
-            } else {
-                // Get subjects for the selected section
-                List<Student> students = sectionStudents.get(selectedSection);
-                System.out.println("Students in section: " + (students != null ? students.size() : "null")); // Debug
-                if (students != null && !students.isEmpty()) {
-                    Student firstStudent = students.get(0);
-                    System.out.println("First student marks: " + firstStudent.getMarks()); // Debug
-                    allSubjects.addAll(firstStudent.getMarks().keySet());
-                }
+                
+                treePanel.add(Box.createVerticalStrut(5));
             }
             
-            System.out.println("All subjects found: " + allSubjects); // Debug
-            
-            if (!allSubjects.isEmpty()) {
-                GridBagConstraints gbc = new GridBagConstraints();
-                gbc.gridx = 0;
-                gbc.gridy = 0;
-                gbc.anchor = GridBagConstraints.WEST;
-                gbc.insets = new Insets(5, 5, 5, 10);
-                
-                for (String subject : allSubjects) {
-                    StyledCheckBox subjectCheckBox = new StyledCheckBox(subject, true);
-                    subjectCheckBoxes.put(subject, subjectCheckBox);
-                    subjectCheckboxPanel.add(subjectCheckBox, gbc);
-                    gbc.gridx++;
-                    if (gbc.gridx > 3) {
-                        gbc.gridx = 0;
-                        gbc.gridy++;
-                    }
+            // Set up overall checkbox listener after all checkboxes are created
+            overallCheck.addActionListener(e -> {
+                boolean selected = overallCheck.isSelected();
+                for (JCheckBox checkbox : allCheckboxes) {
+                    checkbox.setSelected(selected);
                 }
-            } else {
-                // Add a label when no subjects are found
-                JLabel noSubjectsLabel = new JLabel("No subjects found for this section");
-                noSubjectsLabel.setFont(new java.awt.Font("Arial", java.awt.Font.ITALIC, 12));
-                noSubjectsLabel.setForeground(Color.GRAY);
-                subjectCheckboxPanel.add(noSubjectsLabel);
+                
+                if (selected) {
+                    for (Map.Entry<String, List<String>> entry : subjectExamTypes.entrySet()) {
+                        selectedFilters.put(entry.getKey(), new HashSet<>(entry.getValue()));
+                    }
+                } else {
+                    selectedFilters.clear();
+                }
+            });
+            
+            // Select all by default on first load
+            if (selectedFilters.isEmpty()) {
+                for (Map.Entry<String, List<String>> entry : subjectExamTypes.entrySet()) {
+                    selectedFilters.put(entry.getKey(), new HashSet<>(entry.getValue()));
+                }
             }
         }
         
+        JScrollPane scrollPane = new JScrollPane(treePanel);
+        scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
+        scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        scrollPane.setBorder(null);
+        scrollPane.setBackground(Color.WHITE);
+        scrollPane.getVerticalScrollBar().setUnitIncrement(16);
+        scrollPane.setPreferredSize(new Dimension(0, 150)); // Fixed height
+        
+        subjectCheckboxPanel.add(scrollPane, BorderLayout.CENTER);
         subjectCheckboxPanel.revalidate();
         subjectCheckboxPanel.repaint();
+    }
+    
+    private Map<String, List<String>> getSubjectExamTypesForSection(int sectionId) {
+        Map<String, List<String>> subjectExamTypes = new LinkedHashMap<>();
+        
+        try {
+            Connection conn = DatabaseConnection.getConnection();
+            
+            String query = "SELECT DISTINCT s.subject_name, et.exam_name " +
+                          "FROM section_subjects ss " +
+                          "JOIN subjects s ON ss.subject_id = s.id " +
+                          "JOIN subject_exam_types set_tbl ON ss.section_id = set_tbl.section_id AND ss.subject_id = set_tbl.subject_id " +
+                          "JOIN exam_types et ON set_tbl.exam_type_id = et.id " +
+                          "WHERE ss.section_id = ? " +
+                          "ORDER BY s.subject_name, et.exam_name";
+            
+            PreparedStatement ps = conn.prepareStatement(query);
+            ps.setInt(1, sectionId);
+            ResultSet rs = ps.executeQuery();
+            
+            while (rs.next()) {
+                String subjectName = rs.getString("subject_name");
+                String examName = rs.getString("exam_name");
+                
+                subjectExamTypes.putIfAbsent(subjectName, new ArrayList<>());
+                subjectExamTypes.get(subjectName).add(examName);
+            }
+            
+            rs.close();
+            ps.close();
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        
+        return subjectExamTypes;
+    }
+    
+    private Map<String, Map<String, Integer>> getMaxMarksForSection(int sectionId) {
+        Map<String, Map<String, Integer>> maxMarksMap = new LinkedHashMap<>();
+        
+        try {
+            Connection conn = DatabaseConnection.getConnection();
+            
+            // Step 1: Get subjects and their max marks for this section (same as Section Analyzer)
+            String subjectQuery = 
+                "SELECT DISTINCT sub.subject_name, sub.id, ss.max_marks " +
+                "FROM section_subjects ss " +
+                "JOIN subjects sub ON ss.subject_id = sub.id " +
+                "WHERE ss.section_id = ? " +
+                "ORDER BY sub.subject_name";
+            
+            PreparedStatement ps1 = conn.prepareStatement(subjectQuery);
+            ps1.setInt(1, sectionId);
+            ResultSet rs1 = ps1.executeQuery();
+            
+            Map<String, Integer> subjectIds = new HashMap<>();
+            
+            while (rs1.next()) {
+                String subjectName = rs1.getString("subject_name");
+                int subjectId = rs1.getInt("id");
+                subjectIds.put(subjectName, subjectId);
+            }
+            rs1.close();
+            ps1.close();
+            
+            // Step 2: Get exam types and their actual max marks for each subject (same as Section Analyzer)
+            for (Map.Entry<String, Integer> entry : subjectIds.entrySet()) {
+                String subjectName = entry.getKey();
+                int subjectId = entry.getValue();
+                
+                Map<String, Integer> examTypeMaxMarks = new LinkedHashMap<>();
+                
+                // Get exam types from entered_exam_marks table (same approach as Section Analyzer)
+                String examTypeQuery1 = 
+                    "SELECT DISTINCT et.exam_name, et.max_marks " +
+                    "FROM entered_exam_marks sm " +
+                    "JOIN exam_types et ON sm.exam_type_id = et.id " +
+                    "JOIN students s ON sm.student_id = s.id " +
+                    "WHERE sm.subject_id = ? AND s.section_id = ? " +
+                    "ORDER BY et.exam_name";
+                
+                PreparedStatement ps3 = conn.prepareStatement(examTypeQuery1);
+                ps3.setInt(1, subjectId);
+                ps3.setInt(2, sectionId);
+                ResultSet rs3 = ps3.executeQuery();
+                
+                while (rs3.next()) {
+                    String examType = rs3.getString("exam_name");
+                    int maxMarks = rs3.getInt("max_marks");
+                    if (examType != null && !examType.trim().isEmpty()) {
+                        examTypeMaxMarks.put(examType, maxMarks);
+                        System.out.println("DEBUG: MaxMarks - Subject: " + subjectName + ", Exam: " + examType + ", MaxMarks: " + maxMarks);
+                    }
+                }
+                rs3.close();
+                ps3.close();
+                
+                if (!examTypeMaxMarks.isEmpty()) {
+                    maxMarksMap.put(subjectName, examTypeMaxMarks);
+                }
+            }
+            
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        
+        return maxMarksMap;
+    }
+    
+    private boolean isAllSelected(Map<String, List<String>> subjectExamTypes) {
+        for (Map.Entry<String, List<String>> entry : subjectExamTypes.entrySet()) {
+            if (!selectedFilters.containsKey(entry.getKey())) return false;
+            if (!selectedFilters.get(entry.getKey()).containsAll(entry.getValue())) {
+                return false;
+            }
+        }
+        return true;
     }
     
 
@@ -581,37 +1004,146 @@ public class ViewSelectionTool extends JPanel {
         
         // Create column headers based on selected checkboxes
         ArrayList<String> columnNames = new ArrayList<>();
-        if (nameCheckBox.isSelected()) columnNames.add("Name");
-        if (rollNumberCheckBox.isSelected()) columnNames.add("Roll Number");
-        if (emailCheckBox.isSelected()) columnNames.add("Email");
-        if (phoneCheckBox.isSelected()) columnNames.add("Phone");
-        if (sectionCheckBox.isSelected()) columnNames.add("Section");
+        columnGroups.clear();
+        int columnIndex = 0;
         
-        // Add selected subject columns
+        if (nameCheckBox.isSelected()) {
+            columnNames.add("Name");
+            columnIndex++;
+        }
+        if (rollNumberCheckBox.isSelected()) {
+            columnNames.add("Roll Number");
+            columnIndex++;
+        }
+        if (emailCheckBox.isSelected()) {
+            columnNames.add("Email");
+            columnIndex++;
+        }
+        if (phoneCheckBox.isSelected()) {
+            columnNames.add("Phone");
+            columnIndex++;
+        }
+        if (sectionCheckBox.isSelected()) {
+            columnNames.add("Section");
+            columnIndex++;
+        }
+        if (yearCheckBox.isSelected()) {
+            columnNames.add("Year");
+            columnIndex++;
+        }
+        if (semesterCheckBox.isSelected()) {
+            columnNames.add("Semester");
+            columnIndex++;
+        }
+        
+        // Add selected subject columns with exam types
         List<String> selectedSubjects = new ArrayList<>();
-        System.out.println("DEBUG: Subject checkboxes count: " + subjectCheckBoxes.size());
-        for (Map.Entry<String, JCheckBox> entry : subjectCheckBoxes.entrySet()) {
-            System.out.println("DEBUG: Subject " + entry.getKey() + " is " + (entry.getValue().isSelected() ? "selected" : "not selected"));
-            if (entry.getValue().isSelected()) {
-                columnNames.add(entry.getKey());
-                selectedSubjects.add(entry.getKey());
+        Map<String, List<String>> subjectExamTypesMap = new LinkedHashMap<>();
+        Map<String, Map<String, Integer>> maxMarksMap = new HashMap<>();
+        
+        // Get section ID to fetch max marks
+        int sectionId = getSectionIdByName(selectedSection);
+        if (sectionId > 0) {
+            maxMarksMap = getMaxMarksForSection(sectionId);
+        }
+        
+        for (Map.Entry<String, Set<String>> entry : selectedFilters.entrySet()) {
+            if (!entry.getValue().isEmpty()) {
+                String subject = entry.getKey();
+                selectedSubjects.add(subject);
+                List<String> examTypes = new ArrayList<>(entry.getValue());
+                subjectExamTypesMap.put(subject, examTypes);
+                
+                // Create column group for this subject
+                int startCol = columnIndex;
+                
+                // Add columns for each exam type
+                for (String examType : examTypes) {
+                    columnNames.add(subject + " - " + examType);
+                    columnIndex++;
+                }
+                
+                // Add subject total column
+                columnNames.add(subject + " - Total");
+                columnIndex++;
+                
+                // Store group info (including total column)
+                columnGroups.add(new ColumnGroup(subject, startCol, examTypes.size() + 1));
             }
         }
         
-        if (totalMarksCheckBox.isSelected()) columnNames.add("Total Marks");
+        // Store max marks map for header display
+        final Map<String, Map<String, Integer>> finalMaxMarksMap = maxMarksMap;
+        
+        if (totalMarksCheckBox.isSelected()) {
+            // Show max marks in header
+            int maxMarks = selectedSubjects.size() * 100;
+            columnNames.add("Total Marks (" + maxMarks + ")");
+        }
         if (percentageCheckBox.isSelected()) columnNames.add("Percentage");
         if (sgpaCheckBox.isSelected()) columnNames.add("SGPA");
         if (gradeCheckBox.isSelected()) columnNames.add("Grade");
         if (statusCheckBox.isSelected()) columnNames.add("Status");
         if (rankCheckBox.isSelected()) columnNames.add("Rank");
         if (failedSubjectsCheckBox.isSelected()) columnNames.add("Failed Subjects");
+        // Check if a launched result is selected
+        boolean showLaunchedResults = launchedResultsDropdown.getSelectedIndex() > 0;
+        Integer selectedLaunchId = null;
         
-        System.out.println("DEBUG: Column names: " + columnNames);
+        if (showLaunchedResults) {
+            // Extract launch_id from dropdown selection (format: "#9 - 16-Jan-2026 11:50 pm (1 students)")
+            String selectedItem = (String) launchedResultsDropdown.getSelectedItem();
+            if (selectedItem != null && selectedItem.startsWith("#")) {
+                try {
+                    String launchIdStr = selectedItem.substring(1, selectedItem.indexOf(" -"));
+                    selectedLaunchId = Integer.parseInt(launchIdStr);
+                } catch (Exception ex) {
+                    ex.printStackTrace();
+                }
+            }
+        }
+        
+        // Collect all students for ranking
+        List<ExtendedStudentData> allStudentData = new ArrayList<>();
+        
+        // If launched result is selected, fetch students from that launch first to get subject names
+        if (showLaunchedResults && selectedLaunchId != null) {
+            allStudentData = getStudentsFromLaunchedResult(selectedLaunchId, selectedSubjects);
+            
+            // For launched results, always show basic student info
+            columnNames.add("Name");
+            columnNames.add("Roll Number");
+            columnNames.add("Section");
+            columnNames.add("Year");
+            columnNames.add("Semester");
+            columnNames.add("Year");
+            columnNames.add("Semester");
+            
+            // Add subject columns from the launched result data
+            if (!allStudentData.isEmpty()) {
+                ExtendedStudentData firstStudent = allStudentData.get(0);
+                // Get subject names in sorted order for consistency - UPDATE selectedSubjects to use these
+                selectedSubjects = new ArrayList<>(firstStudent.subjectWeightedTotals.keySet());
+                java.util.Collections.sort(selectedSubjects);
+                columnNames.addAll(selectedSubjects);
+            }
+            
+            // Add overall stats
+            columnNames.add("Total Marks");
+            columnNames.add("Percentage");
+            columnNames.add("CGPA");
+            columnNames.add("Grade");
+            columnNames.add("Status");
+            columnNames.add("Launch Date");
+        }
         
         if (columnNames.isEmpty()) {
             showStyledMessage("Please select at least one field to display!", "No Fields Selected", JOptionPane.WARNING_MESSAGE);
             return;
         }
+        
+        // Store subject exam types map for later use
+        final Map<String, List<String>> finalSubjectExamTypesMap = subjectExamTypesMap;
         
         DefaultTableModel model = new DefaultTableModel(columnNames.toArray(new String[0]), 0) {
             @Override
@@ -620,48 +1152,46 @@ public class ViewSelectionTool extends JPanel {
             }
         };
         
-        // Collect all students for ranking
-        List<ExtendedStudentData> allStudentData = new ArrayList<>();
-        
-        // Add data rows
-        if (selectedSection.equals("All Sections")) {
-            System.out.println("DEBUG: Processing all sections");
-            System.out.println("DEBUG: Total sections: " + sectionStudents.size());
-            
-            // Display data from all sections
-            for (Map.Entry<String, List<Student>> entry : sectionStudents.entrySet()) {
-                String section = entry.getKey();
-                List<Student> students = entry.getValue();
-                System.out.println("DEBUG: Section " + section + " has " + students.size() + " students");
+        if (!showLaunchedResults) {
+            // Normal mode: fetch from selected section
+            // Add data rows
+            if (selectedSection.equals("All Sections")) {
+                System.out.println("DEBUG: Processing all sections");
+                System.out.println("DEBUG: Total sections: " + sectionStudents.size());
                 
-                for (Student student : students) {
-                    ExtendedStudentData data = getExtendedStudentData(student, section, selectedSubjects);
-                    if (data != null) {
-                        allStudentData.add(data);
-                    }
-                }
-            }
-        } else {
-            System.out.println("DEBUG: Processing single section: " + selectedSection);
-            
-            // Display data from selected section
-            List<Student> students = sectionStudents.get(selectedSection);
-            System.out.println("DEBUG: Students in section: " + (students != null ? students.size() : "null"));
-            
-            if (students != null) {
-                for (Student student : students) {
-                    ExtendedStudentData data = getExtendedStudentData(student, selectedSection, selectedSubjects);
-                    if (data != null) {
-                        allStudentData.add(data);
+                // Display data from all sections
+                for (Map.Entry<String, List<Student>> entry : sectionStudents.entrySet()) {
+                    String section = entry.getKey();
+                    List<Student> students = entry.getValue();
+                    System.out.println("DEBUG: Section " + section + " has " + students.size() + " students");
+                    
+                    for (Student student : students) {
+                        ExtendedStudentData data = getExtendedStudentData(student, section, selectedSubjects);
+                        if (data != null) {
+                            allStudentData.add(data);
+                        }
                     }
                 }
             } else {
-                showStyledMessage("No students found in section: " + selectedSection, "No Data", JOptionPane.INFORMATION_MESSAGE);
-                return;
+                System.out.println("DEBUG: Processing single section: " + selectedSection);
+                
+                // Display data from selected section
+                List<Student> students = sectionStudents.get(selectedSection);
+                System.out.println("DEBUG: Students in section: " + (students != null ? students.size() : "null"));
+                
+                if (students != null) {
+                    for (Student student : students) {
+                        ExtendedStudentData data = getExtendedStudentData(student, selectedSection, selectedSubjects);
+                        if (data != null) {
+                            allStudentData.add(data);
+                        }
+                    }
+                } else {
+                    showStyledMessage("No students found in section: " + selectedSection, "No Data", JOptionPane.INFORMATION_MESSAGE);
+                    return;
+                }
             }
         }
-        
-        System.out.println("DEBUG: Total students to display: " + allStudentData.size());
         
         if (allStudentData.isEmpty()) {
             showStyledMessage("No student data found for the selected section(s)!", "No Data", JOptionPane.INFORMATION_MESSAGE);
@@ -676,40 +1206,96 @@ public class ViewSelectionTool extends JPanel {
         // Add rows to table
         for (ExtendedStudentData data : allStudentData) {
             ArrayList<Object> rowData = new ArrayList<>();
-            if (nameCheckBox.isSelected()) rowData.add(data.name);
-            if (rollNumberCheckBox.isSelected()) rowData.add(data.rollNumber);
-            if (emailCheckBox.isSelected()) rowData.add(data.email != null ? data.email : "");
-            if (phoneCheckBox.isSelected()) rowData.add(data.phone != null ? data.phone : "");
-            if (sectionCheckBox.isSelected()) rowData.add(data.section);
             
-            // Add subject marks (aggregate all exam types)
+            if (showLaunchedResults) {
+                // For launched results, always add basic student info
+                rowData.add(data.name);
+                rowData.add(data.rollNumber);
+                rowData.add(data.section);
+                rowData.add(String.valueOf(data.year));
+                rowData.add(String.valueOf(data.semester));
+            } else {
+                // For normal mode, use checkbox selections
+                if (nameCheckBox.isSelected()) rowData.add(data.name);
+                if (rollNumberCheckBox.isSelected()) rowData.add(data.rollNumber);
+                if (emailCheckBox.isSelected()) rowData.add(data.email != null ? data.email : "");
+                if (phoneCheckBox.isSelected()) rowData.add(data.phone != null ? data.phone : "");
+                if (sectionCheckBox.isSelected()) rowData.add(data.section);
+                if (yearCheckBox.isSelected()) rowData.add(String.valueOf(data.year));
+                if (semesterCheckBox.isSelected()) rowData.add(String.valueOf(data.semester));
+            }
+            
+            // Add exam type marks for each subject
             for (String subject : selectedSubjects) {
-                Map<String, Integer> examTypes = data.subjectMarks.get(subject);
-                if (examTypes != null && !examTypes.isEmpty()) {
-                    int total = 0;
-                    for (Integer mark : examTypes.values()) {
-                        total += mark;
+                List<String> examTypes = finalSubjectExamTypesMap.get(subject);
+                
+                if (examTypes != null) {
+                    // Add individual exam type marks
+                    for (String examType : examTypes) {
+                        Map<String, Integer> subjectMarks = data.subjectMarks.get(subject);
+                        if (subjectMarks != null && subjectMarks.containsKey(examType)) {
+                            Integer mark = subjectMarks.get(examType);
+                            int markValue = (mark != null) ? mark : 0;
+                            rowData.add(String.valueOf(markValue));
+                        } else {
+                            rowData.add("0");
+                        }
                     }
-                    rowData.add(total);
+                    
+                    // Add subject weighted total WITHOUT % symbol (just number out of 100)
+                    if (data.subjectWeightedTotals != null && data.subjectWeightedTotals.containsKey(subject)) {
+                        double weightedPercentage = data.subjectWeightedTotals.get(subject);
+                        String totalDisplay = String.format("%.0f", weightedPercentage); // No % symbol
+                        
+                        // Mark as failed if subject failed
+                        if (data.subjectPassStatus != null && data.subjectPassStatus.containsKey(subject) 
+                            && !data.subjectPassStatus.get(subject)) {
+                            totalDisplay += " (F)";
+                        }
+                        rowData.add(totalDisplay);
+                    } else {
+                        rowData.add("N/A");
+                    }
                 } else {
-                    rowData.add("-");
+                    // No exam types selected for this subject
+                    rowData.add("N/A");
                 }
             }
             
-            if (totalMarksCheckBox.isSelected()) rowData.add(data.totalMarks);
-            if (percentageCheckBox.isSelected()) rowData.add(String.format("%.2f%%", data.percentage));
-            if (sgpaCheckBox.isSelected()) rowData.add(String.format("%.2f", data.sgpa));
-            if (gradeCheckBox.isSelected()) rowData.add(data.grade);
-            if (statusCheckBox.isSelected()) rowData.add(data.status);
-            if (rankCheckBox.isSelected()) rowData.add(data.rank);
-            if (failedSubjectsCheckBox.isSelected()) rowData.add(data.failedSubjectsCount);
+            if (showLaunchedResults) {
+                // For launched results, always add overall stats
+                rowData.add(String.valueOf(data.totalMarks));
+                rowData.add(String.format("%.2f%%", data.percentage));
+                rowData.add(String.format("%.2f", data.sgpa));
+                rowData.add(data.grade);
+                rowData.add(data.status);
+                rowData.add(data.launchDate);
+            } else {
+                // For normal mode, use checkbox selections
+                // Format: Just show totalMarks without (max)
+                if (totalMarksCheckBox.isSelected()) {
+                    rowData.add(String.format("%.0f", data.totalMarks));
+                }
+                if (percentageCheckBox.isSelected()) rowData.add(String.format("%.2f%%", data.percentage));
+                if (sgpaCheckBox.isSelected()) rowData.add(String.format("%.2f", data.sgpa));
+                if (gradeCheckBox.isSelected()) rowData.add(data.grade);
+                if (statusCheckBox.isSelected()) rowData.add(data.status);
+                if (rankCheckBox.isSelected()) rowData.add(data.rank);
+                if (failedSubjectsCheckBox.isSelected()) rowData.add(data.failedSubjectsCount);
+            }
             
             model.addRow(rowData.toArray());
         }
         
-        System.out.println("DEBUG: Added " + model.getRowCount() + " rows to table");
-        
         resultTable.setModel(model);
+        
+        // Apply custom 2-row header if we have subjects selected
+        if (!finalSubjectExamTypesMap.isEmpty()) {
+            setupMultiRowHeader(finalSubjectExamTypesMap, finalMaxMarksMap);
+        }
+        
+        // Auto-resize columns to fit content
+        autoResizeTableColumns(resultTable);
         
         // Apply alternating row colors and conditional formatting
         resultTable.setDefaultRenderer(Object.class, new DefaultTableCellRenderer() {
@@ -717,6 +1303,12 @@ public class ViewSelectionTool extends JPanel {
             public Component getTableCellRendererComponent(JTable table, Object value,
                     boolean isSelected, boolean hasFocus, int row, int column) {
                 Component c = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
+                
+                // Handle HTML content for multi-line text
+                if (value != null && value.toString().contains("\\n")) {
+                    String htmlText = "<html>" + value.toString().replace("\\n", "<br>") + "</html>";
+                    ((JLabel) c).setText(htmlText);
+                }
                 
                 if (!isSelected) {
                     if (row % 2 == 0) {
@@ -781,7 +1373,10 @@ public class ViewSelectionTool extends JPanel {
         // Get additional info from database
         try {
             Connection conn = DatabaseConnection.getConnection();
-            String query = "SELECT email, phone FROM students WHERE roll_number = ? AND created_by = ?";
+            String query = "SELECT s.email, s.phone, sec.academic_year, sec.semester " +
+                          "FROM students s " +
+                          "JOIN sections sec ON s.section_id = sec.id " +
+                          "WHERE s.roll_number = ? AND s.created_by = ?";
             PreparedStatement ps = conn.prepareStatement(query);
             ps.setString(1, student.getRollNumber());
             ps.setInt(2, com.sms.login.LoginScreen.currentUserId);
@@ -790,6 +1385,8 @@ public class ViewSelectionTool extends JPanel {
             if (rs.next()) {
                 data.email = rs.getString("email");
                 data.phone = rs.getString("phone");
+                data.year = rs.getInt("academic_year");
+                data.semester = rs.getInt("semester");
             }
             
             rs.close();
@@ -833,9 +1430,35 @@ public class ViewSelectionTool extends JPanel {
         try {
             Connection conn = DatabaseConnection.getConnection();
             
-            // Get subject details with max marks, passing marks, and credits
+            // Get student ID from roll number
+            String studentIdQuery = "SELECT id FROM students WHERE roll_number = ? AND section_id = ?";
+            PreparedStatement psStudent = conn.prepareStatement(studentIdQuery);
+            psStudent.setString(1, data.rollNumber);
+            psStudent.setInt(2, sectionId);
+            ResultSet rsStudent = psStudent.executeQuery();
+            
+            int studentId = 0;
+            if (rsStudent.next()) {
+                studentId = rsStudent.getInt("id");
+            }
+            rsStudent.close();
+            psStudent.close();
+            
+            if (studentId == 0) {
+                System.out.println("ERROR: Student ID not found for roll number: " + data.rollNumber);
+                return;
+            }
+            
+            // Use AnalyzerDAO to get student marks the same way Section Analyzer does
+            AnalyzerDAO analyzerDAO = new AnalyzerDAO();
+            
+            // Get marks for this student (same approach as Section Analyzer)
+            Map<String, Map<String, Integer>> studentMarks = getStudentMarksFromDB(studentId, sectionId);
+            data.subjectMarks = studentMarks;
+            
+            // Get subject details with credits  
             String query = """
-                SELECT sub.subject_name, ss.max_marks, ss.passing_marks, ss.credit
+                SELECT sub.id, sub.subject_name, ss.max_marks, ss.passing_marks, ss.credit
                 FROM section_subjects ss
                 JOIN subjects sub ON ss.subject_id = sub.id
                 WHERE ss.section_id = ?
@@ -845,33 +1468,139 @@ public class ViewSelectionTool extends JPanel {
             ps.setInt(1, sectionId);
             ResultSet rs = ps.executeQuery();
             
+            double totalWeightedPercentage = 0;
+            int subjectCount = 0;
+            
             while (rs.next()) {
+                int subjectId = rs.getInt("id");
                 String subjectName = rs.getString("subject_name");
                 int maxMarks = rs.getInt("max_marks");
-                int passingMarks = rs.getInt("passing_marks");
                 int credit = rs.getInt("credit");
                 
-                Map<String, Integer> examTypes = data.subjectMarks.get(subjectName);
-                if (examTypes != null && !examTypes.isEmpty()) {
-                    // Aggregate all exam types for this subject
-                    int totalSubjectMarks = 0;
-                    for (Integer mark : examTypes.values()) {
-                        totalSubjectMarks += mark;
-                    }
+                // Only process if this subject was in the marks data
+                if (!data.subjectMarks.containsKey(subjectName)) {
+                    continue;
+                }
+                
+                // Get selected filters for this subject (or null for all)
+                Set<String> examFilter = selectedFilters.get(subjectName);
+                
+                // Calculate weighted total using AnalyzerDAO with DUAL PASSING logic (same as Section Analyzer)
+                AnalyzerDAO.SubjectPassResult result = analyzerDAO.calculateWeightedSubjectTotalWithPass(
+                    studentId, sectionId, subjectName, examFilter);
+                
+                double weightedPercentage = Math.abs(result.percentage);
+                boolean passed = result.passed;
+                
+                // Store subject-level details (same as Section Analyzer)
+                data.subjectWeightedTotals.put(subjectName, weightedPercentage);
+                data.subjectPassStatus.put(subjectName, passed);
+                data.subjectFailedComponents.put(subjectName, result.failedComponents);
+                
+                // Aggregate for overall calculation
+                totalWeightedPercentage += weightedPercentage;
+                subjectCount++;
+                data.totalCredits += credit;
+                
+                // Calculate grade points for SGPA (based on weighted percentage)
+                double gradePoint = calculateGradePoint((int)weightedPercentage, 100);
+                data.totalGradePoints += (gradePoint * credit);
+                
+                // Check if failed (Component-level passing only - ignore weighted %)
+                // Student fails if ANY component didn't meet its passing threshold
+                if (!result.allComponentsPassed) {
+                    data.failedSubjectsCount++;
+                    System.out.println("FAILED Subject: " + subjectName + 
+                                     " | Weighted%: " + String.format("%.2f", weightedPercentage) +
+                                     " | Failed Components: " + result.failedComponents);
+                }
+            }
+            
+            rs.close();
+            ps.close();
+            
+            // Calculate total marks as sum of weighted percentages
+            if (subjectCount > 0) {
+                data.totalMarks = totalWeightedPercentage; // Sum of all subject weighted %
+                data.totalMaxMarks = subjectCount * 100; // Max is 100 per subject
+                data.percentage = (data.totalMarks / data.totalMaxMarks) * 100; // Percentage for 100 scale
+            } else {
+                data.totalMarks = 0.0;
+                data.totalMaxMarks = 0;
+                data.percentage = 0.0;
+            }
+            
+            // Calculate CGPA using proper formula:
+            // CGPA = Σ[(subjectPercentage/10) × credit] / Σ[credit]
+            if (data.totalCredits > 0) {
+                double totalWeightedPoints = 0.0;
+                for (Map.Entry<String, Double> entry : data.subjectWeightedTotals.entrySet()) {
+                    // Get credit for this subject from database
+                    String subjectName = entry.getKey();
+                    double percentage = entry.getValue();
                     
-                    data.totalMarks += totalSubjectMarks;
-                    data.totalMaxMarks += maxMarks;
-                    data.totalCredits += credit;
-                    
-                    // Calculate grade points for SGPA
-                    double gradePoint = calculateGradePoint(totalSubjectMarks, maxMarks);
-                    data.totalGradePoints += (gradePoint * credit);
-                    
-                    // Check if failed
-                    if (totalSubjectMarks < passingMarks) {
-                        data.failedSubjectsCount++;
+                    // Find credit for this subject
+                    try {
+                        String creditQuery = "SELECT ss.credit FROM section_subjects ss " +
+                                           "JOIN subjects sub ON ss.subject_id = sub.id " +
+                                           "WHERE ss.section_id = ? AND sub.subject_name = ?";
+                        PreparedStatement psCredit = conn.prepareStatement(creditQuery);
+                        psCredit.setInt(1, sectionId);
+                        psCredit.setString(2, subjectName);
+                        ResultSet rsCredit = psCredit.executeQuery();
+                        if (rsCredit.next()) {
+                            int credit = rsCredit.getInt("credit");
+                            totalWeightedPoints += (percentage / 10.0) * credit;
+                        }
+                        rsCredit.close();
+                        psCredit.close();
+                    } catch (SQLException e) {
+                        e.printStackTrace();
                     }
                 }
+                data.sgpa = totalWeightedPoints / data.totalCredits;
+            } else {
+                data.sgpa = 0.0;
+            }
+            
+            // Calculate grade
+            data.grade = calculateGrade(data.percentage);
+            
+            // Determine status (fail if ANY subject failed)
+            data.status = (data.failedSubjectsCount == 0) ? "Pass" : "Fail";
+            
+            // Get launched results info
+            data.launchedResultsInfo = getLaunchedResultsInfo(studentId);
+            
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
+    
+    // Helper method to get student marks from database (same approach as Section Analyzer)
+    private Map<String, Map<String, Integer>> getStudentMarksFromDB(int studentId, int sectionId) {
+        Map<String, Map<String, Integer>> marks = new HashMap<>();
+        try {
+            Connection conn = DatabaseConnection.getConnection();
+            
+            // Same query as Section Analyzer uses
+            String query = "SELECT sub.subject_name, et.exam_name, sm.marks_obtained " +
+                          "FROM entered_exam_marks sm " +
+                          "JOIN subjects sub ON sm.subject_id = sub.id " +
+                          "JOIN exam_types et ON sm.exam_type_id = et.id " +
+                          "WHERE sm.student_id = ? " +
+                          "ORDER BY sub.subject_name, et.exam_name";
+            
+            PreparedStatement ps = conn.prepareStatement(query);
+            ps.setInt(1, studentId);
+            ResultSet rs = ps.executeQuery();
+            
+            while (rs.next()) {
+                String subjectName = rs.getString("subject_name");
+                String examName = rs.getString("exam_name");
+                int marksObtained = rs.getInt("marks_obtained");
+                
+                marks.computeIfAbsent(subjectName, k -> new HashMap<>()).put(examName, marksObtained);
             }
             
             rs.close();
@@ -880,26 +1609,214 @@ public class ViewSelectionTool extends JPanel {
         } catch (SQLException e) {
             e.printStackTrace();
         }
+        return marks;
+    }
+    
+    private String getLaunchedResultsInfo(int studentId) {
+        StringBuilder info = new StringBuilder();
         
-        // Calculate percentage
-        if (data.totalMaxMarks > 0) {
-            data.percentage = (data.totalMarks * 100.0) / data.totalMaxMarks;
-        } else {
-            data.percentage = 0.0;
+        try {
+            Connection conn = DatabaseConnection.getConnection();
+            
+            String query = "SELECT launch_id, created_at " +
+                          "FROM launched_student_results " +
+                          "WHERE student_id = ? " +
+                          "ORDER BY created_at DESC";
+            
+            PreparedStatement ps = conn.prepareStatement(query);
+            ps.setInt(1, studentId);
+            ResultSet rs = ps.executeQuery();
+            
+            java.text.SimpleDateFormat dateFormat = new java.text.SimpleDateFormat("dd-MMM-yyyy");
+            
+            while (rs.next()) {
+                if (info.length() > 0) {
+                    info.append("; ");
+                }
+                info.append("Launch #")
+                    .append(rs.getInt("launch_id"))
+                    .append(" (")
+                    .append(dateFormat.format(rs.getTimestamp("created_at")))
+                    .append(")");
+            }
+            
+            rs.close();
+            ps.close();
+        } catch (SQLException e) {
+            e.printStackTrace();
+            return "Error fetching launched results";
         }
         
-        // Calculate SGPA
-        if (data.totalCredits > 0) {
-            data.sgpa = data.totalGradePoints / data.totalCredits;
-        } else {
-            data.sgpa = 0.0;
+        return info.length() > 0 ? info.toString() : "None";
+    }
+    
+    private List<ExtendedStudentData> getStudentsFromLaunchedResult(int launchId, List<String> selectedSubjects) {
+        List<ExtendedStudentData> studentDataList = new ArrayList<>();
+        
+        try {
+            Connection conn = DatabaseConnection.getConnection();
+            
+            // Get all students from this launch with their result data
+            String query = "SELECT lsr.student_id, lsr.created_at, lsr.result_data, " +
+                          "s.student_name, s.roll_number, s.email, s.phone, sec.section_name, sec.academic_year, sec.semester " +
+                          "FROM launched_student_results lsr " +
+                          "JOIN students s ON lsr.student_id = s.id " +
+                          "JOIN sections sec ON s.section_id = sec.id " +
+                          "WHERE lsr.launch_id = ? " +
+                          "ORDER BY s.roll_number";
+            
+            PreparedStatement ps = conn.prepareStatement(query);
+            ps.setInt(1, launchId);
+            ResultSet rs = ps.executeQuery();
+            
+            java.text.SimpleDateFormat dateFormat = new java.text.SimpleDateFormat("dd-MMM-yyyy hh:mm a");
+            
+            while (rs.next()) {
+                ExtendedStudentData data = new ExtendedStudentData();
+                data.studentId = rs.getInt("student_id");
+                data.name = rs.getString("student_name");
+                data.rollNumber = rs.getString("roll_number");
+                data.email = rs.getString("email");
+                data.phone = rs.getString("phone");
+                data.section = rs.getString("section_name");
+                data.year = rs.getInt("academic_year");
+                data.semester = rs.getInt("semester");
+                data.launchDate = dateFormat.format(rs.getTimestamp("created_at"));
+                
+                // Parse result_data JSON to get subject marks
+                String resultData = rs.getString("result_data");
+                if (resultData != null && !resultData.isEmpty()) {
+                    parseResultData(data, resultData, selectedSubjects);
+                }
+                
+                studentDataList.add(data);
+            }
+            
+            rs.close();
+            ps.close();
+        } catch (SQLException e) {
+            e.printStackTrace();
         }
         
-        // Calculate grade
-        data.grade = calculateGrade(data.percentage);
-        
-        // Determine status
-        data.status = (data.failedSubjectsCount == 0) ? "Pass" : "Fail";
+        return studentDataList;
+    }
+    
+    private void parseResultData(ExtendedStudentData data, String jsonData, List<String> selectedSubjects) {
+        // Parse nested JSON structure with "subjects" array
+        try {
+            // First, extract subject names and their exam_types for display
+            Map<String, List<String>> subjectExamTypes = new HashMap<>();
+            
+            // Use regex to find each subject block with its exam_types array
+            java.util.regex.Pattern subjectPattern = java.util.regex.Pattern.compile(
+                "\"subject_name\":\"([^\"]+)\".*?\"exam_types\":\\[(.*?)\\].*?\"weighted_total\":(\\d+(?:\\.\\d+)?).*?\"passed\":(true|false)", 
+                java.util.regex.Pattern.DOTALL);
+            java.util.regex.Matcher subjectMatcher = subjectPattern.matcher(jsonData);
+            
+            double totalPercentage = 0;
+            int subjectCount = 0;
+            int failedCount = 0;
+            
+            while (subjectMatcher.find()) {
+                String subjectName = subjectMatcher.group(1);
+                String examTypesArray = subjectMatcher.group(2);
+                double weightedTotal = Double.parseDouble(subjectMatcher.group(3));
+                boolean passed = "true".equals(subjectMatcher.group(4));
+                
+                // Extract exam type names from the array
+                List<String> examTypesList = new ArrayList<>();
+                java.util.regex.Pattern examTypePattern = java.util.regex.Pattern.compile("\"exam_name\":\"([^\"]+)\"");
+                java.util.regex.Matcher examTypeMatcher = examTypePattern.matcher(examTypesArray);
+                
+                while (examTypeMatcher.find()) {
+                    examTypesList.add(examTypeMatcher.group(1));
+                }
+                
+                subjectExamTypes.put(subjectName, examTypesList);
+                
+                System.out.println("DEBUG: Found subject: " + subjectName + " = " + weightedTotal + " (" + (passed ? "passed" : "failed") + ")");
+                System.out.println("DEBUG: Exam types: " + examTypesList);
+                
+                data.subjectWeightedTotals.put(subjectName, weightedTotal);
+                data.subjectPassStatus.put(subjectName, passed);
+                
+                totalPercentage += weightedTotal;
+                subjectCount++;
+                
+                if (!passed) {
+                    failedCount++;
+                }
+            }
+            
+            // Store exam types information for display
+            data.subjectExamTypes = subjectExamTypes;
+            
+            System.out.println("DEBUG: Total subjects parsed: " + subjectCount);
+            
+            // Extract overall data
+            if (subjectCount > 0) {
+                String overallPercentageStr = extractJsonValue(jsonData, "percentage");
+                String cgpaStr = extractJsonValue(jsonData, "cgpa");
+                String gradeStr = extractJsonValue(jsonData, "grade");
+                String isPassingStr = extractJsonValue(jsonData, "is_passing");
+                
+                if (overallPercentageStr != null) {
+                    data.percentage = Double.parseDouble(overallPercentageStr);
+                } else {
+                    data.percentage = totalPercentage / subjectCount;
+                }
+                
+                if (cgpaStr != null) {
+                    data.sgpa = Double.parseDouble(cgpaStr);
+                } else {
+                    data.sgpa = data.percentage / 10.0;
+                }
+                
+                data.grade = gradeStr != null ? gradeStr : calculateGrade(data.percentage);
+                data.status = "true".equals(isPassingStr) ? "Pass" : "Fail";
+                data.failedSubjectsCount = failedCount;
+                data.totalMarks = (int) data.percentage;
+            }
+        } catch (Exception e) {
+            System.err.println("ERROR parsing result data: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+    
+    private String extractJsonValue(String json, String key) {
+        try {
+            String searchKey = "\"" + key + "\":";
+            int startIndex = json.indexOf(searchKey);
+            if (startIndex == -1) return null;
+            
+            startIndex += searchKey.length();
+            
+            // Skip whitespace
+            while (startIndex < json.length() && Character.isWhitespace(json.charAt(startIndex))) {
+                startIndex++;
+            }
+            
+            // Check if value is a string (starts with ")
+            if (json.charAt(startIndex) == '"') {
+                startIndex++; // Skip opening quote
+                int endIndex = json.indexOf('"', startIndex);
+                if (endIndex == -1) return null;
+                return json.substring(startIndex, endIndex);
+            } else {
+                // Value is a number or boolean
+                int endIndex = startIndex;
+                while (endIndex < json.length() && 
+                       (Character.isDigit(json.charAt(endIndex)) || 
+                        json.charAt(endIndex) == '.' || 
+                        json.charAt(endIndex) == '-' ||
+                        Character.isLetter(json.charAt(endIndex)))) {
+                    endIndex++;
+                }
+                return json.substring(startIndex, endIndex);
+            }
+        } catch (Exception e) {
+            return null;
+        }
     }
     
     
@@ -927,7 +1844,7 @@ public class ViewSelectionTool extends JPanel {
     
     private void calculateRanks(List<ExtendedStudentData> students) {
         // Sort by total marks in descending order
-        students.sort((s1, s2) -> Integer.compare(s2.totalMarks, s1.totalMarks));
+        students.sort((s1, s2) -> Double.compare(s2.totalMarks, s1.totalMarks));
         
         // Assign ranks
         int currentRank = 1;
@@ -1163,46 +2080,90 @@ public class ViewSelectionTool extends JPanel {
                     filePath += ".pdf";
                 }
                 
-                Document document = new Document(PageSize.A4.rotate());
+                // Use A3 landscape for more space
+                Document document = new Document(PageSize.A3.rotate());
                 PdfWriter.getInstance(document, new FileOutputStream(filePath));
                 document.open();
                 
                 // Add title
                 com.itextpdf.text.Font titleFont = new com.itextpdf.text.Font(
-                    com.itextpdf.text.Font.FontFamily.HELVETICA, 18, com.itextpdf.text.Font.BOLD);
+                    com.itextpdf.text.Font.FontFamily.HELVETICA, 16, com.itextpdf.text.Font.BOLD);
                 Paragraph title = new Paragraph("Student Data Report", titleFont);
                 title.setAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
                 document.add(title);
                 document.add(new Paragraph("\n"));
                 
-                // Create table
-                PdfPTable pdfTable = new PdfPTable(resultTable.getColumnCount());
-                pdfTable.setWidthPercentage(100);
+                // Create table with proper column widths
+                int columnCount = resultTable.getColumnCount();
+                PdfPTable pdfTable = new PdfPTable(columnCount);
+                pdfTable.setWidthPercentage(98); // Use 98% of page width
                 
-                // Add headers
+                // Set relative column widths based on content type
+                float[] columnWidths = new float[columnCount];
+                for (int i = 0; i < columnCount; i++) {
+                    String colName = resultTable.getColumnName(i);
+                    // Student info columns - wider
+                    if (colName.contains("Name")) {
+                        columnWidths[i] = 3.0f;
+                    } else if (colName.contains("Roll") || colName.contains("Email")) {
+                        columnWidths[i] = 2.5f;
+                    } else if (colName.contains("Section") || colName.contains("Year") || colName.contains("Semester")) {
+                        columnWidths[i] = 1.5f;
+                    } else if (colName.contains("Total Marks") || colName.contains("Percentage")) {
+                        columnWidths[i] = 2.0f;
+                    } else if (colName.contains("Phone")) {
+                        columnWidths[i] = 2.0f;
+                    } else {
+                        // Exam marks and other columns
+                        columnWidths[i] = 1.5f;
+                    }
+                }
+                pdfTable.setWidths(columnWidths);
+                
+                // Add headers with proper formatting
                 com.itextpdf.text.Font headerFont = new com.itextpdf.text.Font(
-                    com.itextpdf.text.Font.FontFamily.HELVETICA, 10, com.itextpdf.text.Font.BOLD);
-                for (int i = 0; i < resultTable.getColumnCount(); i++) {
+                    com.itextpdf.text.Font.FontFamily.HELVETICA, 8, com.itextpdf.text.Font.BOLD);
+                for (int i = 0; i < columnCount; i++) {
                     com.itextpdf.text.pdf.PdfPCell cell = new com.itextpdf.text.pdf.PdfPCell(
                         new com.itextpdf.text.Phrase(resultTable.getColumnName(i), headerFont));
-                    cell.setBackgroundColor(com.itextpdf.text.BaseColor.LIGHT_GRAY);
+                    cell.setBackgroundColor(new com.itextpdf.text.BaseColor(200, 200, 200));
                     cell.setHorizontalAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
+                    cell.setVerticalAlignment(com.itextpdf.text.Element.ALIGN_MIDDLE);
+                    cell.setPadding(5);
+                    cell.setPaddingBottom(8);
                     pdfTable.addCell(cell);
                 }
                 
-                // Add data
+                // Add data with proper formatting and padding
                 com.itextpdf.text.Font dataFont = new com.itextpdf.text.Font(
-                    com.itextpdf.text.Font.FontFamily.HELVETICA, 9);
+                    com.itextpdf.text.Font.FontFamily.HELVETICA, 7);
                 for (int i = 0; i < resultTable.getRowCount(); i++) {
-                    for (int j = 0; j < resultTable.getColumnCount(); j++) {
+                    for (int j = 0; j < columnCount; j++) {
                         Object value = resultTable.getValueAt(i, j);
                         String cellValue = value != null ? value.toString() : "";
                         
                         com.itextpdf.text.pdf.PdfPCell cell = new com.itextpdf.text.pdf.PdfPCell(
                             new com.itextpdf.text.Phrase(cellValue, dataFont));
                         
+                        // Alignment based on content
+                        String colName = resultTable.getColumnName(j);
+                        if (colName.contains("Name") || colName.contains("Email") || 
+                            colName.contains("Section") || colName.contains("Status") || 
+                            colName.contains("Grade") || colName.contains("Phone")) {
+                            cell.setHorizontalAlignment(com.itextpdf.text.Element.ALIGN_LEFT);
+                        } else {
+                            cell.setHorizontalAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
+                        }
+                        cell.setVerticalAlignment(com.itextpdf.text.Element.ALIGN_MIDDLE);
+                        cell.setPadding(4);
+                        
+                        // Zebra striping for better readability
+                        if (i % 2 == 0) {
+                            cell.setBackgroundColor(new com.itextpdf.text.BaseColor(245, 245, 245));
+                        }
+                        
                         // Color coding for status
-                        if (resultTable.getColumnName(j).equals("Status")) {
+                        if (colName.equals("Status")) {
                             if ("Pass".equals(cellValue)) {
                                 cell.setBackgroundColor(new com.itextpdf.text.BaseColor(220, 255, 220));
                             } else if ("Fail".equals(cellValue)) {
@@ -1245,6 +2206,38 @@ public class ViewSelectionTool extends JPanel {
             e.printStackTrace();
         }
     }
+    
+    private void autoResizeTableColumns(JTable table) {
+        TableColumnModel columnModel = table.getColumnModel();
+        
+        for (int column = 0; column < table.getColumnCount(); column++) {
+            TableColumn tableColumn = columnModel.getColumn(column);
+            int preferredWidth = 100; // Minimum width
+            int maxWidth = 400; // Maximum width
+            
+            // Get header width
+            TableCellRenderer headerRenderer = table.getTableHeader().getDefaultRenderer();
+            Component headerComp = headerRenderer.getTableCellRendererComponent(
+                table, tableColumn.getHeaderValue(), false, false, 0, column);
+            preferredWidth = Math.max(preferredWidth, headerComp.getPreferredSize().width + 20);
+            
+            // Get max cell width from first 100 rows (for performance)
+            int rowsToCheck = Math.min(100, table.getRowCount());
+            for (int row = 0; row < rowsToCheck; row++) {
+                TableCellRenderer cellRenderer = table.getCellRenderer(row, column);
+                Component comp = table.prepareRenderer(cellRenderer, row, column);
+                int width = comp.getPreferredSize().width + 20;
+                preferredWidth = Math.max(preferredWidth, width);
+                
+                if (preferredWidth >= maxWidth) {
+                    preferredWidth = maxWidth;
+                    break;
+                }
+            }
+            
+            tableColumn.setPreferredWidth(preferredWidth);
+        }
+    }
 
     private void showStyledMessage(String message, String title, int messageType) {
         JOptionPane optionPane = new JOptionPane(message, messageType);
@@ -1260,13 +2253,16 @@ public class ViewSelectionTool extends JPanel {
     
     // Inner class to hold extended student data
     private static class ExtendedStudentData {
+        int studentId;
         String name;
         String rollNumber;
         String email;
         String phone;
         String section;
+        int year;
+        int semester;
         Map<String, Map<String, Integer>> subjectMarks;
-        int totalMarks;
+        double totalMarks; // Changed to double for weighted sum
         int totalMaxMarks;
         double percentage;
         double sgpa;
@@ -1277,8 +2273,97 @@ public class ViewSelectionTool extends JPanel {
         int rank;
         int failedSubjectsCount;
         
+        // New fields for weighted calculation system
+        Map<String, Double> subjectWeightedTotals; // Subject -> weighted percentage
+        Map<String, List<String>> subjectFailedComponents; // Subject -> list of failed exam types
+        Map<String, Boolean> subjectPassStatus; // Subject -> pass/fail
+        Map<String, List<String>> subjectExamTypes; // Subject -> list of exam type names
+        String launchedResultsInfo; // Comma-separated list of launched result names
+        String launchDate; // Date when result was launched
+        
         ExtendedStudentData() {
             subjectMarks = new HashMap<>();
+            subjectWeightedTotals = new HashMap<>();
+            subjectFailedComponents = new HashMap<>();
+            subjectPassStatus = new HashMap<>();
+            subjectExamTypes = new HashMap<>();
+            launchedResultsInfo = "";
+        }
+    }
+    
+    private void setupMultiRowHeader(Map<String, List<String>> subjectExamTypesMap, Map<String, Map<String, Integer>> maxMarksMap) {
+        JTableHeader header = resultTable.getTableHeader();
+        header.setPreferredSize(new Dimension(header.getWidth(), 60)); // Double height for 2 rows
+        
+        TableCellRenderer headerRenderer = new TableCellRenderer() {
+            @Override
+            public Component getTableCellRendererComponent(JTable table, Object value,
+                    boolean isSelected, boolean hasFocus, int row, int column) {
+                
+                JPanel panel = new JPanel(new BorderLayout());
+                panel.setBackground(new Color(248, 250, 252));
+                panel.setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(new Color(229, 231, 235)),
+                    BorderFactory.createEmptyBorder(2, 5, 2, 5)
+                ));
+                
+                String columnName = value.toString();
+                
+                // Check if this column is part of a subject group
+                String subjectName = null;
+                String examTypeName = null;
+                boolean isTotal = false;
+                
+                if (columnName.contains(" - ")) {
+                    String[] parts = columnName.split(" - ", 2);
+                    subjectName = parts[0];
+                    examTypeName = parts[1];
+                    isTotal = examTypeName.equals("Total");
+                }
+                
+                if (subjectName != null && examTypeName != null) {
+                    // Two-row header: subject on top, exam type on bottom
+                    JLabel topLabel = new JLabel(subjectName, SwingConstants.CENTER);
+                    topLabel.setFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, 11));
+                    topLabel.setForeground(new Color(79, 70, 229));
+                    
+                    String bottomText = examTypeName;
+                    
+                    if (isTotal) {
+                        // For total column, show max marks (100)
+                        bottomText = "Total (100)";
+                    } else {
+                        // Show max marks for individual exam type
+                        if (maxMarksMap.containsKey(subjectName) && 
+                            maxMarksMap.get(subjectName).containsKey(examTypeName)) {
+                            int maxMarks = maxMarksMap.get(subjectName).get(examTypeName);
+                            bottomText = examTypeName + " (" + maxMarks + ")";
+                        } else {
+                            bottomText = examTypeName + " (N/A)";
+                        }
+                    }
+                    
+                    JLabel bottomLabel = new JLabel(bottomText, SwingConstants.CENTER);
+                    bottomLabel.setFont(new java.awt.Font("SansSerif", java.awt.Font.PLAIN, 10));
+                    bottomLabel.setForeground(isTotal ? new Color(34, 197, 94) : new Color(17, 24, 39));
+                    
+                    panel.add(topLabel, BorderLayout.NORTH);
+                    panel.add(bottomLabel, BorderLayout.CENTER);
+                } else {
+                    // Single-row header for non-subject columns
+                    JLabel label = new JLabel(columnName, SwingConstants.CENTER);
+                    label.setFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, 12));
+                    label.setForeground(new Color(17, 24, 39));
+                    panel.add(label, BorderLayout.CENTER);
+                }
+                
+                return panel;
+            }
+        };
+        
+        // Apply renderer to all columns
+        for (int i = 0; i < resultTable.getColumnCount(); i++) {
+            resultTable.getColumnModel().getColumn(i).setHeaderRenderer(headerRenderer);
         }
     }
     
