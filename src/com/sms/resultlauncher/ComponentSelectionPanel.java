@@ -316,16 +316,21 @@ public class ComponentSelectionPanel extends JPanel {
     
     private JPanel createSubjectHeader(String subject, int count) {
         JPanel panel = new JPanel(new BorderLayout());
-        panel.setOpaque(false);
-        panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 25));
+        panel.setOpaque(true);
+        panel.setBackground(new Color(59, 130, 246)); // Blue background
+        panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 35));
+        panel.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(37, 99, 235), 1),
+            BorderFactory.createEmptyBorder(6, 12, 6, 12)
+        ));
         
         JLabel subjectLabel = new JLabel("📚 " + subject);
-        subjectLabel.setFont(new Font("SansSerif", Font.BOLD, 13));
-        subjectLabel.setForeground(ResultLauncherUtils.PRIMARY_COLOR);
+        subjectLabel.setFont(new Font("SansSerif", Font.BOLD, 14));
+        subjectLabel.setForeground(Color.WHITE);
         
         JLabel countLabel = new JLabel(count + " components");
-        countLabel.setFont(new Font("SansSerif", Font.PLAIN, 11));
-        countLabel.setForeground(ResultLauncherUtils.TEXT_SECONDARY);
+        countLabel.setFont(new Font("SansSerif", Font.BOLD, 11));
+        countLabel.setForeground(new Color(219, 234, 254));
         
         panel.add(subjectLabel, BorderLayout.WEST);
         panel.add(countLabel, BorderLayout.EAST);
@@ -370,13 +375,43 @@ public class ComponentSelectionPanel extends JPanel {
     
     private JPanel createComponentPanel(Component component) {
         JPanel panel = new JPanel(new BorderLayout(10, 0));
-        panel.setOpaque(false);
-        panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 40));
-        panel.setBorder(BorderFactory.createEmptyBorder(5, 20, 5, 5));
+        panel.setOpaque(true);
+        panel.setBackground(new Color(249, 250, 251)); // Light gray background
+        panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 60));
+        panel.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(229, 231, 235), 1, true),
+            BorderFactory.createEmptyBorder(8, 12, 8, 12)
+        ));
         
+        // Make it look like a card with hover effect
+        panel.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mouseEntered(java.awt.event.MouseEvent e) {
+                panel.setBackground(new Color(243, 244, 246));
+                panel.setCursor(new Cursor(Cursor.HAND_CURSOR));
+            }
+            
+            @Override
+            public void mouseExited(java.awt.event.MouseEvent e) {
+                panel.setBackground(new Color(249, 250, 251));
+                panel.setCursor(new Cursor(Cursor.DEFAULT_CURSOR));
+            }
+            
+            @Override
+            public void mouseClicked(java.awt.event.MouseEvent e) {
+                JCheckBox checkbox = componentCheckboxes.get(component);
+                if (checkbox != null) {
+                    checkbox.setSelected(!checkbox.isSelected());
+                    checkbox.getActionListeners()[0].actionPerformed(null);
+                }
+            }
+        });
+        
+        // Left side - Checkbox
         JCheckBox checkbox = new JCheckBox();
         checkbox.setOpaque(false);
         checkbox.setSelected(true); // Default to selected
+        checkbox.setPreferredSize(new Dimension(20, 20));
         checkbox.addActionListener(e -> {
             updateSelectionCount();
             updateSelectAllState();
@@ -385,33 +420,67 @@ public class ComponentSelectionPanel extends JPanel {
         
         componentCheckboxes.put(component, checkbox);
         
-        JPanel infoPanel = new JPanel();
-        infoPanel.setLayout(new BoxLayout(infoPanel, BoxLayout.Y_AXIS));
+        // Center - Component info with modern layout
+        JPanel infoPanel = new JPanel(new BorderLayout(8, 0));
         infoPanel.setOpaque(false);
         
+        // Left info - Name and type
+        JPanel leftInfo = new JPanel();
+        leftInfo.setLayout(new BoxLayout(leftInfo, BoxLayout.Y_AXIS));
+        leftInfo.setOpaque(false);
+        
         JLabel nameLabel = new JLabel(component.getName());
-        nameLabel.setFont(new Font("SansSerif", Font.BOLD, 12));
-        nameLabel.setForeground(ResultLauncherUtils.TEXT_PRIMARY);
+        nameLabel.setFont(new Font("SansSerif", Font.BOLD, 13));
+        nameLabel.setForeground(new Color(17, 24, 39));
         nameLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
         
-        String details = String.format("Max Marks: %.0f | Weight: %.0f", 
-            component.getMaxMarks(), component.getWeight());
+        // Type badge
+        String type = component.getType() != null ? component.getType() : "Component";
+        JLabel typeLabel = new JLabel(type);
+        typeLabel.setFont(new Font("SansSerif", Font.PLAIN, 10));
+        typeLabel.setForeground(new Color(107, 114, 128));
+        typeLabel.setOpaque(true);
+        typeLabel.setBackground(new Color(229, 231, 235));
+        typeLabel.setBorder(BorderFactory.createEmptyBorder(2, 8, 2, 8));
+        typeLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
         
-        JLabel detailsLabel = new JLabel(details);
-        detailsLabel.setFont(new Font("SansSerif", Font.PLAIN, 10));
-        detailsLabel.setForeground(ResultLauncherUtils.TEXT_SECONDARY);
-        detailsLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        leftInfo.add(nameLabel);
+        leftInfo.add(Box.createVerticalStrut(4));
+        leftInfo.add(typeLabel);
         
-        infoPanel.add(nameLabel);
-        infoPanel.add(detailsLabel);
+        // Right info - Marks details in a grid
+        JPanel marksPanel = new JPanel(new GridLayout(2, 2, 8, 2));
+        marksPanel.setOpaque(false);
+        marksPanel.setBorder(BorderFactory.createEmptyBorder(0, 10, 0, 0));
         
-        JLabel typeLabel = new JLabel(component.getType());
-        typeLabel.setFont(new Font("SansSerif", Font.BOLD, 10));
-        typeLabel.setForeground(ResultLauncherUtils.INFO_COLOR);
+        // Max Marks
+        JLabel maxLabel = new JLabel("Max Marks:");
+        maxLabel.setFont(new Font("SansSerif", Font.PLAIN, 10));
+        maxLabel.setForeground(new Color(107, 114, 128));
+        
+        JLabel maxValue = new JLabel(String.format("%.0f", component.getMaxMarks()));
+        maxValue.setFont(new Font("SansSerif", Font.BOLD, 11));
+        maxValue.setForeground(new Color(59, 130, 246));
+        
+        // Weight/Scaled Marks
+        JLabel weightLabel = new JLabel("Weight:");
+        weightLabel.setFont(new Font("SansSerif", Font.PLAIN, 10));
+        weightLabel.setForeground(new Color(107, 114, 128));
+        
+        JLabel weightValue = new JLabel(String.format("%.0f", component.getWeight()));
+        weightValue.setFont(new Font("SansSerif", Font.BOLD, 11));
+        weightValue.setForeground(new Color(16, 185, 129));
+        
+        marksPanel.add(maxLabel);
+        marksPanel.add(maxValue);
+        marksPanel.add(weightLabel);
+        marksPanel.add(weightValue);
+        
+        infoPanel.add(leftInfo, BorderLayout.WEST);
+        infoPanel.add(marksPanel, BorderLayout.EAST);
         
         panel.add(checkbox, BorderLayout.WEST);
         panel.add(infoPanel, BorderLayout.CENTER);
-        panel.add(typeLabel, BorderLayout.EAST);
         
         return panel;
     }

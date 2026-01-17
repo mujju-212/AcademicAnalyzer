@@ -1106,6 +1106,10 @@ public class ViewSelectionTool extends JPanel {
         // Collect all students for ranking
         List<ExtendedStudentData> allStudentData = new ArrayList<>();
         
+        // Maps to store exam types and max marks for launched results
+        Map<String, List<String>> launchedResultsExamTypesMap = new HashMap<>();
+        Map<String, Map<String, Integer>> launchedResultsMaxMarksMap = new HashMap<>();
+        
         // If launched result is selected, fetch students from that launch first to get subject names
         if (showLaunchedResults && selectedLaunchId != null) {
             allStudentData = getStudentsFromLaunchedResult(selectedLaunchId, selectedSubjects);
@@ -1116,16 +1120,42 @@ public class ViewSelectionTool extends JPanel {
             columnNames.add("Section");
             columnNames.add("Year");
             columnNames.add("Semester");
-            columnNames.add("Year");
-            columnNames.add("Semester");
             
-            // Add subject columns from the launched result data
+            // Add subject columns with exam types from the launched result data
             if (!allStudentData.isEmpty()) {
                 ExtendedStudentData firstStudent = allStudentData.get(0);
                 // Get subject names in sorted order for consistency - UPDATE selectedSubjects to use these
                 selectedSubjects = new ArrayList<>(firstStudent.subjectWeightedTotals.keySet());
                 java.util.Collections.sort(selectedSubjects);
-                columnNames.addAll(selectedSubjects);
+                
+                // Build exam types and max marks maps for multi-row headers
+                if (firstStudent.subjectExamTypes != null) {
+                    for (String subject : selectedSubjects) {
+                        List<String> examTypes = firstStudent.subjectExamTypes.get(subject);
+                        Map<String, Integer> subjectMaxMarks = firstStudent.subjectMaxMarks != null ? 
+                            firstStudent.subjectMaxMarks.get(subject) : null;
+                        
+                        if (examTypes != null && !examTypes.isEmpty()) {
+                            // Store for header rendering
+                            launchedResultsExamTypesMap.put(subject, examTypes);
+                            
+                            // Store max marks if available
+                            if (subjectMaxMarks != null && !subjectMaxMarks.isEmpty()) {
+                                launchedResultsMaxMarksMap.put(subject, subjectMaxMarks);
+                            }
+                            
+                            // Add individual exam type columns
+                            for (String examType : examTypes) {
+                                columnNames.add(subject + " - " + examType);
+                            }
+                            // Add total column
+                            columnNames.add(subject + " - Total");
+                        } else {
+                            // No exam types - just add subject name
+                            columnNames.add(subject);
+                        }
+                    }
+                }
             }
             
             // Add overall stats
@@ -1227,9 +1257,12 @@ public class ViewSelectionTool extends JPanel {
             
             // Add exam type marks for each subject
             for (String subject : selectedSubjects) {
-                List<String> examTypes = finalSubjectExamTypesMap.get(subject);
+                // Use the correct exam types map based on mode
+                List<String> examTypes = showLaunchedResults ? 
+                    launchedResultsExamTypesMap.get(subject) : 
+                    finalSubjectExamTypesMap.get(subject);
                 
-                if (examTypes != null) {
+                if (examTypes != null && !examTypes.isEmpty()) {
                     // Add individual exam type marks
                     for (String examType : examTypes) {
                         Map<String, Integer> subjectMarks = data.subjectMarks.get(subject);
@@ -1257,8 +1290,12 @@ public class ViewSelectionTool extends JPanel {
                         rowData.add("N/A");
                     }
                 } else {
-                    // No exam types selected for this subject
-                    rowData.add("N/A");
+                    // No exam types - shouldn't happen but handle gracefully
+                    if (data.subjectWeightedTotals != null && data.subjectWeightedTotals.containsKey(subject)) {
+                        rowData.add(String.format("%.0f", data.subjectWeightedTotals.get(subject)));
+                    } else {
+                        rowData.add("N/A");
+                    }
                 }
             }
             
@@ -1290,7 +1327,10 @@ public class ViewSelectionTool extends JPanel {
         resultTable.setModel(model);
         
         // Apply custom 2-row header if we have subjects selected
-        if (!finalSubjectExamTypesMap.isEmpty()) {
+        if (showLaunchedResults && !launchedResultsExamTypesMap.isEmpty()) {
+            // For launched results, use the maps built from JSON data
+            setupMultiRowHeader(launchedResultsExamTypesMap, launchedResultsMaxMarksMap);
+        } else if (!finalSubjectExamTypesMap.isEmpty()) {
             setupMultiRowHeader(finalSubjectExamTypesMap, finalMaxMarksMap);
         }
         
@@ -1723,19 +1763,40 @@ public class ViewSelectionTool extends JPanel {
                 double weightedTotal = Double.parseDouble(subjectMatcher.group(3));
                 boolean passed = "true".equals(subjectMatcher.group(4));
                 
-                // Extract exam type names from the array
+                // Extract exam type names, obtained marks, AND max marks from the array
                 List<String> examTypesList = new ArrayList<>();
-                java.util.regex.Pattern examTypePattern = java.util.regex.Pattern.compile("\"exam_name\":\"([^\"]+)\"");
+                Map<String, Integer> examMarksMap = new HashMap<>();
+                Map<String, Integer> examMaxMarksMap = new HashMap<>();
+                
+                // Pattern to match: "exam_name":"Internal","obtained":18,"max":20,"weightage":20
+                java.util.regex.Pattern examTypePattern = java.util.regex.Pattern.compile(
+                    "\"exam_name\":\"([^\"]+)\".*?\"obtained\":(\\d+).*?\"max\":(\\d+)");
                 java.util.regex.Matcher examTypeMatcher = examTypePattern.matcher(examTypesArray);
                 
                 while (examTypeMatcher.find()) {
-                    examTypesList.add(examTypeMatcher.group(1));
+                    String examName = examTypeMatcher.group(1);
+                    int obtainedMarks = Integer.parseInt(examTypeMatcher.group(2));
+                    int maxMarks = Integer.parseInt(examTypeMatcher.group(3));
+                    
+                    examTypesList.add(examName);
+                    examMarksMap.put(examName, obtainedMarks);
+                    examMaxMarksMap.put(examName, maxMarks);
                 }
                 
                 subjectExamTypes.put(subjectName, examTypesList);
+                data.subjectMarks.put(subjectName, examMarksMap);
+                
+                // Store max marks for header display
+                if (!examMaxMarksMap.isEmpty()) {
+                    if (data.subjectMaxMarks == null) {
+                        data.subjectMaxMarks = new HashMap<>();
+                    }
+                    data.subjectMaxMarks.put(subjectName, examMaxMarksMap);
+                }
                 
                 System.out.println("DEBUG: Found subject: " + subjectName + " = " + weightedTotal + " (" + (passed ? "passed" : "failed") + ")");
                 System.out.println("DEBUG: Exam types: " + examTypesList);
+                System.out.println("DEBUG: Exam marks: " + examMarksMap);
                 
                 data.subjectWeightedTotals.put(subjectName, weightedTotal);
                 data.subjectPassStatus.put(subjectName, passed);
@@ -1775,7 +1836,8 @@ public class ViewSelectionTool extends JPanel {
                 data.grade = gradeStr != null ? gradeStr : calculateGrade(data.percentage);
                 data.status = "true".equals(isPassingStr) ? "Pass" : "Fail";
                 data.failedSubjectsCount = failedCount;
-                data.totalMarks = (int) data.percentage;
+                // Total marks should be sum of all subject weighted totals
+                data.totalMarks = totalPercentage;
             }
         } catch (Exception e) {
             System.err.println("ERROR parsing result data: " + e.getMessage());
@@ -1921,51 +1983,146 @@ public class ViewSelectionTool extends JPanel {
                 workbook = new XSSFWorkbook();
                 Sheet sheet = workbook.createSheet("Student Data");
                 
-                // Create header row with styling
-                Row headerRow = sheet.createRow(0);
+                // Create column header row at row 4 with modern styling
+                Row headerRow = sheet.createRow(4);
+                headerRow.setHeightInPoints(25);
                 CellStyle headerStyle = workbook.createCellStyle();
                 org.apache.poi.ss.usermodel.Font headerFont = workbook.createFont();
                 headerFont.setBold(true);
+                headerFont.setFontHeightInPoints((short) 11);
+                headerFont.setColor(IndexedColors.WHITE.getIndex());
                 headerStyle.setFont(headerFont);
-                headerStyle.setFillForegroundColor(IndexedColors.GREY_25_PERCENT.getIndex());
+                headerStyle.setFillForegroundColor(IndexedColors.DARK_BLUE.getIndex());
                 headerStyle.setFillPattern(FillPatternType.SOLID_FOREGROUND);
-                headerStyle.setBorderBottom(BorderStyle.THIN);
-                headerStyle.setBorderTop(BorderStyle.THIN);
+                headerStyle.setBorderBottom(BorderStyle.MEDIUM);
+                headerStyle.setBorderTop(BorderStyle.MEDIUM);
                 headerStyle.setBorderLeft(BorderStyle.THIN);
                 headerStyle.setBorderRight(BorderStyle.THIN);
+                headerStyle.setAlignment(HorizontalAlignment.CENTER);
+                headerStyle.setVerticalAlignment(VerticalAlignment.CENTER);
                 
-                // Add headers
+                // ============ MODERN HEADER SECTION ============
+                // Create title rows
+                Row titleRow = sheet.createRow(0);
+                titleRow.setHeightInPoints(30);
+                Cell titleCell = titleRow.createCell(0);
+                titleCell.setCellValue("ACADEMIC MANAGEMENT SYSTEM");
+                
+                CellStyle titleStyle = workbook.createCellStyle();
+                org.apache.poi.ss.usermodel.Font titleFont = workbook.createFont();
+                titleFont.setFontHeightInPoints((short) 18);
+                titleFont.setBold(true);
+                titleFont.setColor(IndexedColors.DARK_BLUE.getIndex());
+                titleStyle.setFont(titleFont);
+                titleStyle.setAlignment(HorizontalAlignment.CENTER);
+                titleStyle.setVerticalAlignment(VerticalAlignment.CENTER);
+                titleCell.setCellStyle(titleStyle);
+                
+                // Subtitle
+                Row subtitleRow = sheet.createRow(1);
+                subtitleRow.setHeightInPoints(25);
+                Cell subtitleCell = subtitleRow.createCell(0);
+                subtitleCell.setCellValue("Student Performance Report");
+                
+                CellStyle subtitleStyle = workbook.createCellStyle();
+                org.apache.poi.ss.usermodel.Font subtitleFont = workbook.createFont();
+                subtitleFont.setFontHeightInPoints((short) 14);
+                subtitleFont.setBold(true);
+                subtitleFont.setColor(IndexedColors.GREY_80_PERCENT.getIndex());
+                subtitleStyle.setFont(subtitleFont);
+                subtitleStyle.setAlignment(HorizontalAlignment.CENTER);
+                subtitleStyle.setVerticalAlignment(VerticalAlignment.CENTER);
+                subtitleCell.setCellStyle(subtitleStyle);
+                
+                // Info row
+                Row infoRow = sheet.createRow(2);
+                infoRow.setHeightInPoints(18);
+                Cell infoCell = infoRow.createCell(0);
+                String selectedSection = (String) sectionDropdown.getSelectedItem();
+                String sectionInfo = selectedSection != null ? selectedSection : "All Sections";
+                infoCell.setCellValue("Section: " + sectionInfo + " | Generated: " + 
+                    new java.text.SimpleDateFormat("dd MMM yyyy, hh:mm a").format(new java.util.Date()));
+                
+                CellStyle infoStyle = workbook.createCellStyle();
+                org.apache.poi.ss.usermodel.Font infoFont = workbook.createFont();
+                infoFont.setFontHeightInPoints((short) 10);
+                infoFont.setItalic(true);
+                infoFont.setColor(IndexedColors.GREY_50_PERCENT.getIndex());
+                infoStyle.setFont(infoFont);
+                infoStyle.setAlignment(HorizontalAlignment.CENTER);
+                infoCell.setCellStyle(infoStyle);
+                
+                // Empty row for spacing
+                sheet.createRow(3);
+                
+                // Add column headers with modern styling
                 for (int i = 0; i < resultTable.getColumnCount(); i++) {
                     Cell cell = headerRow.createCell(i);
                     cell.setCellValue(resultTable.getColumnName(i));
                     cell.setCellStyle(headerStyle);
                 }
                 
-                // Create cell styles for data
+                // Create modern cell styles for data
                 CellStyle dataStyle = workbook.createCellStyle();
                 dataStyle.setBorderBottom(BorderStyle.THIN);
                 dataStyle.setBorderTop(BorderStyle.THIN);
                 dataStyle.setBorderLeft(BorderStyle.THIN);
                 dataStyle.setBorderRight(BorderStyle.THIN);
+                dataStyle.setVerticalAlignment(VerticalAlignment.CENTER);
                 
+                // Alternating row style
+                CellStyle altRowStyle = workbook.createCellStyle();
+                altRowStyle.cloneStyleFrom(dataStyle);
+                altRowStyle.setFillForegroundColor(IndexedColors.GREY_25_PERCENT.getIndex());
+                altRowStyle.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+                
+                // Pass style - modern green
                 CellStyle passStyle = workbook.createCellStyle();
                 passStyle.cloneStyleFrom(dataStyle);
+                passStyle.setFillForegroundColor(IndexedColors.LIGHT_GREEN.getIndex());
+                passStyle.setFillPattern(FillPatternType.SOLID_FOREGROUND);
                 org.apache.poi.ss.usermodel.Font passFont = workbook.createFont();
-                passFont.setColor(IndexedColors.GREEN.getIndex());
+                passFont.setColor(IndexedColors.DARK_GREEN.getIndex());
+                passFont.setBold(true);
                 passStyle.setFont(passFont);
                 
+                // Fail style - modern red
                 CellStyle failStyle = workbook.createCellStyle();
                 failStyle.cloneStyleFrom(dataStyle);
+                failStyle.setFillForegroundColor(IndexedColors.ROSE.getIndex());
+                failStyle.setFillPattern(FillPatternType.SOLID_FOREGROUND);
                 org.apache.poi.ss.usermodel.Font failFont = workbook.createFont();
                 failFont.setColor(IndexedColors.RED.getIndex());
+                failFont.setBold(true);
                 failStyle.setFont(failFont);
                 
-                // Create data rows
+                // Bold style for important columns
+                CellStyle boldStyle = workbook.createCellStyle();
+                boldStyle.cloneStyleFrom(dataStyle);
+                org.apache.poi.ss.usermodel.Font boldFont = workbook.createFont();
+                boldFont.setBold(true);
+                boldStyle.setFont(boldFont);
+                
+                CellStyle boldAltStyle = workbook.createCellStyle();
+                boldAltStyle.cloneStyleFrom(altRowStyle);
+                boldAltStyle.setFont(boldFont);
+                
+                // Create data rows with modern styling
                 for (int i = 0; i < resultTable.getRowCount(); i++) {
-                    Row row = sheet.createRow(i + 1);
+                    Row row = sheet.createRow(i + 5); // Start after header section
+                    row.setHeightInPoints(20); // Taller rows for better readability
+                    
+                    boolean isAltRow = (i % 2 == 1);
+                    
                     for (int j = 0; j < resultTable.getColumnCount(); j++) {
                         Cell cell = row.createCell(j);
                         Object value = resultTable.getValueAt(i, j);
+                        String colName = resultTable.getColumnName(j);
+                        
+                        // Determine if this is an important column (for bold)
+                        boolean isImportant = colName.contains("Name") || colName.contains("Total") ||
+                                            colName.contains("CGPA") || colName.contains("Grade") ||
+                                            colName.contains("Rank");
                         
                         // Set cell value based on type
                         if (value == null) {
@@ -1982,24 +2139,25 @@ public class ViewSelectionTool extends JPanel {
                                     double percentValue = Double.parseDouble(strValue.replace("%", ""));
                                     cell.setCellValue(percentValue / 100.0);
                                     CellStyle percentStyle = workbook.createCellStyle();
-                                    percentStyle.cloneStyleFrom(dataStyle);
+                                    percentStyle.cloneStyleFrom(isAltRow ? altRowStyle : dataStyle);
+                                    if (isImportant) percentStyle.setFont(boldFont);
                                     percentStyle.setDataFormat(workbook.createDataFormat().getFormat("0.00%"));
                                     cell.setCellStyle(percentStyle);
                                 } catch (NumberFormatException e) {
                                     cell.setCellValue(strValue);
-                                    cell.setCellStyle(dataStyle);
+                                    cell.setCellStyle(isImportant ? (isAltRow ? boldAltStyle : boldStyle) : (isAltRow ? altRowStyle : dataStyle));
                                 }
                             } else {
                                 cell.setCellValue(strValue);
-                                cell.setCellStyle(dataStyle);
+                                cell.setCellStyle(isImportant ? (isAltRow ? boldAltStyle : boldStyle) : (isAltRow ? altRowStyle : dataStyle));
                             }
                         } else {
                             cell.setCellValue(value.toString());
-                            cell.setCellStyle(dataStyle);
+                            cell.setCellStyle(isImportant ? (isAltRow ? boldAltStyle : boldStyle) : (isAltRow ? altRowStyle : dataStyle));
                         }
                         
                         // Apply conditional formatting for status
-                        if (resultTable.getColumnName(j).equals("Status")) {
+                        if (colName.equals("Status")) {
                             String cellValue = value != null ? value.toString() : "";
                             if ("Pass".equals(cellValue)) {
                                 cell.setCellStyle(passStyle);
@@ -2007,16 +2165,40 @@ public class ViewSelectionTool extends JPanel {
                                 cell.setCellStyle(failStyle);
                             }
                         }
+                        
+                        // Center align for numeric columns
+                        if (!colName.contains("Name") && !colName.contains("Email") && 
+                            !colName.contains("Phone") && !colName.contains("Section")) {
+                            CellStyle currentStyle = cell.getCellStyle();
+                            if (currentStyle != passStyle && currentStyle != failStyle) {
+                                CellStyle centeredStyle = workbook.createCellStyle();
+                                centeredStyle.cloneStyleFrom(currentStyle);
+                                centeredStyle.setAlignment(HorizontalAlignment.CENTER);
+                                cell.setCellStyle(centeredStyle);
+                            }
+                        }
                     }
                 }
                 
-                // Auto-size columns
+                // Merge cells for title section
+                sheet.addMergedRegion(new org.apache.poi.ss.util.CellRangeAddress(0, 0, 0, resultTable.getColumnCount() - 1));
+                sheet.addMergedRegion(new org.apache.poi.ss.util.CellRangeAddress(1, 1, 0, resultTable.getColumnCount() - 1));
+                sheet.addMergedRegion(new org.apache.poi.ss.util.CellRangeAddress(2, 2, 0, resultTable.getColumnCount() - 1));
+                
+                // Auto-size columns with better spacing
                 for (int i = 0; i < resultTable.getColumnCount(); i++) {
                     sheet.autoSizeColumn(i);
-                    // Add some extra space
+                    // Add generous extra space for readability
                     int currentWidth = sheet.getColumnWidth(i);
-                    sheet.setColumnWidth(i, currentWidth + 500);
+                    sheet.setColumnWidth(i, currentWidth + 1200);
                 }
+                
+                // Set print settings for professional output
+                sheet.setFitToPage(true);
+                sheet.getPrintSetup().setFitWidth((short) 1);
+                sheet.getPrintSetup().setFitHeight((short) 0);
+                sheet.getPrintSetup().setLandscape(true);
+                sheet.setHorizontallyCenter(true);
                 
                 // Write to file
                 fileOut = new FileOutputStream(filePath);
@@ -2080,102 +2262,214 @@ public class ViewSelectionTool extends JPanel {
                     filePath += ".pdf";
                 }
                 
-                // Use A3 landscape for more space
-                Document document = new Document(PageSize.A3.rotate());
+                // Use A4 landscape for professional report
+                Document document = new Document(PageSize.A4.rotate(), 30, 30, 30, 30);
                 PdfWriter.getInstance(document, new FileOutputStream(filePath));
                 document.open();
                 
-                // Add title
+                // ============ MODERN HEADER SECTION ============
+                // Institution name
+                com.itextpdf.text.Font institutionFont = new com.itextpdf.text.Font(
+                    com.itextpdf.text.Font.FontFamily.HELVETICA, 20, com.itextpdf.text.Font.BOLD,
+                    new com.itextpdf.text.BaseColor(33, 37, 41));
+                Paragraph institution = new Paragraph("Academic Management System", institutionFont);
+                institution.setAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
+                institution.setSpacingAfter(4);
+                document.add(institution);
+                
+                // Report title
                 com.itextpdf.text.Font titleFont = new com.itextpdf.text.Font(
-                    com.itextpdf.text.Font.FontFamily.HELVETICA, 16, com.itextpdf.text.Font.BOLD);
-                Paragraph title = new Paragraph("Student Data Report", titleFont);
+                    com.itextpdf.text.Font.FontFamily.HELVETICA, 16, com.itextpdf.text.Font.BOLD,
+                    new com.itextpdf.text.BaseColor(52, 58, 64));
+                Paragraph title = new Paragraph("Student Performance Report", titleFont);
                 title.setAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
+                title.setSpacingAfter(2);
                 document.add(title);
+                
+                // Get section info
+                String selectedSection = (String) sectionDropdown.getSelectedItem();
+                String sectionInfo = selectedSection != null ? selectedSection : "All Sections";
+                
+                // Section and date info
+                com.itextpdf.text.Font infoFont = new com.itextpdf.text.Font(
+                    com.itextpdf.text.Font.FontFamily.HELVETICA, 10, com.itextpdf.text.Font.NORMAL,
+                    new com.itextpdf.text.BaseColor(108, 117, 125));
+                Paragraph info = new Paragraph(
+                    "Section: " + sectionInfo + "  |  Generated: " + 
+                    new java.text.SimpleDateFormat("dd MMM yyyy, hh:mm a").format(new java.util.Date()),
+                    infoFont
+                );
+                info.setAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
+                info.setSpacingAfter(12);
+                document.add(info);
+                
+                // Decorative line
+                com.itextpdf.text.pdf.draw.LineSeparator line = new com.itextpdf.text.pdf.draw.LineSeparator();
+                line.setLineColor(new com.itextpdf.text.BaseColor(52, 143, 226));
+                line.setLineWidth(2);
+                document.add(new com.itextpdf.text.Chunk(line));
                 document.add(new Paragraph("\n"));
                 
-                // Create table with proper column widths
+                // ============ DATA TABLE ============
                 int columnCount = resultTable.getColumnCount();
                 PdfPTable pdfTable = new PdfPTable(columnCount);
-                pdfTable.setWidthPercentage(98); // Use 98% of page width
+                pdfTable.setWidthPercentage(100);
+                pdfTable.setSpacingBefore(5);
                 
-                // Set relative column widths based on content type
+                // Calculate font sizes based on column count for better fitting
+                int headerFontSize = columnCount > 35 ? 5 : (columnCount > 30 ? 5 : (columnCount > 25 ? 6 : (columnCount > 20 ? 7 : (columnCount > 15 ? 8 : 9))));
+                int dataFontSize = columnCount > 35 ? 4 : (columnCount > 30 ? 5 : (columnCount > 25 ? 5 : (columnCount > 20 ? 6 : (columnCount > 15 ? 7 : 8))));
+                
+                // Set relative column widths based on content type - very aggressive for many columns
                 float[] columnWidths = new float[columnCount];
                 for (int i = 0; i < columnCount; i++) {
                     String colName = resultTable.getColumnName(i);
-                    // Student info columns - wider
                     if (colName.contains("Name")) {
-                        columnWidths[i] = 3.0f;
-                    } else if (colName.contains("Roll") || colName.contains("Email")) {
-                        columnWidths[i] = 2.5f;
+                        columnWidths[i] = columnCount > 35 ? 2.0f : (columnCount > 25 ? 2.2f : (columnCount > 20 ? 2.5f : 3.5f));
+                    } else if (colName.contains("Roll")) {
+                        columnWidths[i] = columnCount > 35 ? 1.2f : (columnCount > 25 ? 1.3f : (columnCount > 20 ? 1.5f : 2.0f));
+                    } else if (colName.contains("Email")) {
+                        columnWidths[i] = columnCount > 35 ? 1.5f : (columnCount > 25 ? 1.7f : (columnCount > 20 ? 2.0f : 2.8f));
                     } else if (colName.contains("Section") || colName.contains("Year") || colName.contains("Semester")) {
-                        columnWidths[i] = 1.5f;
+                        columnWidths[i] = columnCount > 35 ? 0.7f : (columnCount > 25 ? 0.8f : (columnCount > 20 ? 1.0f : 1.3f));
                     } else if (colName.contains("Total Marks") || colName.contains("Percentage")) {
-                        columnWidths[i] = 2.0f;
+                        columnWidths[i] = columnCount > 35 ? 1.0f : (columnCount > 25 ? 1.2f : (columnCount > 20 ? 1.5f : 2.0f));
+                    } else if (colName.contains("CGPA") || colName.contains("Grade")) {
+                        columnWidths[i] = columnCount > 35 ? 0.6f : (columnCount > 25 ? 0.7f : (columnCount > 20 ? 1.0f : 1.3f));
+                    } else if (colName.contains("Status") || colName.contains("Rank")) {
+                        columnWidths[i] = columnCount > 35 ? 0.7f : (columnCount > 25 ? 0.8f : (columnCount > 20 ? 1.0f : 1.3f));
                     } else if (colName.contains("Phone")) {
-                        columnWidths[i] = 2.0f;
+                        columnWidths[i] = columnCount > 35 ? 1.2f : (columnCount > 25 ? 1.3f : (columnCount > 20 ? 1.5f : 2.0f));
                     } else {
-                        // Exam marks and other columns
-                        columnWidths[i] = 1.5f;
+                        // Exam marks and subject columns - very compact
+                        columnWidths[i] = columnCount > 35 ? 0.6f : (columnCount > 25 ? 0.65f : (columnCount > 20 ? 0.8f : 1.2f));
                     }
                 }
                 pdfTable.setWidths(columnWidths);
                 
-                // Add headers with proper formatting
+                // Add headers with modern styling and better text wrapping
                 com.itextpdf.text.Font headerFont = new com.itextpdf.text.Font(
-                    com.itextpdf.text.Font.FontFamily.HELVETICA, 8, com.itextpdf.text.Font.BOLD);
+                    com.itextpdf.text.Font.FontFamily.HELVETICA, headerFontSize, com.itextpdf.text.Font.BOLD,
+                    new com.itextpdf.text.BaseColor(255, 255, 255));
+                    
                 for (int i = 0; i < columnCount; i++) {
+                    String colName = resultTable.getColumnName(i);
+                    
+                    // Abbreviate long column names for better fitting
+                    String displayName = colName;
+                    if (columnCount > 20) {
+                        displayName = displayName.replace("Internal", "Int")
+                                                 .replace("External", "Ext")
+                                                 .replace("Assignment", "Assgn")
+                                                 .replace("Examination", "Exam")
+                                                 .replace("Practical", "Pract")
+                                                 .replace("Theory", "Th")
+                                                 .replace("Final", "Fin");
+                    }
+                    
                     com.itextpdf.text.pdf.PdfPCell cell = new com.itextpdf.text.pdf.PdfPCell(
-                        new com.itextpdf.text.Phrase(resultTable.getColumnName(i), headerFont));
-                    cell.setBackgroundColor(new com.itextpdf.text.BaseColor(200, 200, 200));
+                        new com.itextpdf.text.Phrase(displayName, headerFont));
+                    cell.setBackgroundColor(new com.itextpdf.text.BaseColor(52, 143, 226));
                     cell.setHorizontalAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
                     cell.setVerticalAlignment(com.itextpdf.text.Element.ALIGN_MIDDLE);
-                    cell.setPadding(5);
-                    cell.setPaddingBottom(8);
+                    cell.setRotation(0); // Ensure text is NOT rotated
+                    
+                    // Adjust padding based on column count - very tight for many columns
+                    int padding = columnCount > 35 ? 1 : (columnCount > 25 ? 1 : (columnCount > 20 ? 2 : (columnCount > 15 ? 3 : 4)));
+                    cell.setPadding(padding);
+                    cell.setPaddingTop(padding + 1);
+                    cell.setPaddingBottom(padding + 1);
+                    cell.setBorderWidth(0.3f);
+                    cell.setBorderColor(new com.itextpdf.text.BaseColor(255, 255, 255));
+                    
+                    // Enable text wrapping for long headers
+                    cell.setNoWrap(false);
+                    
                     pdfTable.addCell(cell);
                 }
                 
-                // Add data with proper formatting and padding
+                // Add data with professional formatting
                 com.itextpdf.text.Font dataFont = new com.itextpdf.text.Font(
-                    com.itextpdf.text.Font.FontFamily.HELVETICA, 7);
+                    com.itextpdf.text.Font.FontFamily.HELVETICA, dataFontSize, com.itextpdf.text.Font.NORMAL,
+                    new com.itextpdf.text.BaseColor(33, 37, 41));
+                com.itextpdf.text.Font boldDataFont = new com.itextpdf.text.Font(
+                    com.itextpdf.text.Font.FontFamily.HELVETICA, dataFontSize, com.itextpdf.text.Font.BOLD,
+                    new com.itextpdf.text.BaseColor(33, 37, 41));
+                    
                 for (int i = 0; i < resultTable.getRowCount(); i++) {
                     for (int j = 0; j < columnCount; j++) {
                         Object value = resultTable.getValueAt(i, j);
                         String cellValue = value != null ? value.toString() : "";
+                        String colName = resultTable.getColumnName(j);
+                        
+                        // Use bold font for important columns
+                        com.itextpdf.text.Font currentFont = 
+                            (colName.contains("Name") || colName.contains("Total") || 
+                             colName.contains("CGPA") || colName.contains("Grade") || 
+                             colName.contains("Rank")) ? boldDataFont : dataFont;
                         
                         com.itextpdf.text.pdf.PdfPCell cell = new com.itextpdf.text.pdf.PdfPCell(
-                            new com.itextpdf.text.Phrase(cellValue, dataFont));
+                            new com.itextpdf.text.Phrase(cellValue, currentFont));
                         
                         // Alignment based on content
-                        String colName = resultTable.getColumnName(j);
                         if (colName.contains("Name") || colName.contains("Email") || 
-                            colName.contains("Section") || colName.contains("Status") || 
-                            colName.contains("Grade") || colName.contains("Phone")) {
+                            colName.contains("Section") || colName.contains("Phone")) {
                             cell.setHorizontalAlignment(com.itextpdf.text.Element.ALIGN_LEFT);
                         } else {
                             cell.setHorizontalAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
                         }
                         cell.setVerticalAlignment(com.itextpdf.text.Element.ALIGN_MIDDLE);
-                        cell.setPadding(4);
                         
-                        // Zebra striping for better readability
+                        // Very compact padding for many columns
+                        int padding = columnCount > 35 ? 1 : (columnCount > 25 ? 1 : (columnCount > 20 ? 2 : (columnCount > 15 ? 3 : 4)));
+                        cell.setPadding(padding);
+                        
+                        // Modern alternating row colors
                         if (i % 2 == 0) {
-                            cell.setBackgroundColor(new com.itextpdf.text.BaseColor(245, 245, 245));
+                            cell.setBackgroundColor(new com.itextpdf.text.BaseColor(248, 249, 250));
+                        } else {
+                            cell.setBackgroundColor(new com.itextpdf.text.BaseColor(255, 255, 255));
                         }
                         
-                        // Color coding for status
+                        // Professional color coding for status
                         if (colName.equals("Status")) {
                             if ("Pass".equals(cellValue)) {
-                                cell.setBackgroundColor(new com.itextpdf.text.BaseColor(220, 255, 220));
+                                cell.setBackgroundColor(new com.itextpdf.text.BaseColor(212, 237, 218));
+                                com.itextpdf.text.Font passFont = new com.itextpdf.text.Font(
+                                    com.itextpdf.text.Font.FontFamily.HELVETICA, dataFontSize, com.itextpdf.text.Font.BOLD,
+                                    new com.itextpdf.text.BaseColor(25, 135, 84));
+                                cell.setPhrase(new com.itextpdf.text.Phrase(cellValue, passFont));
                             } else if ("Fail".equals(cellValue)) {
-                                cell.setBackgroundColor(new com.itextpdf.text.BaseColor(255, 220, 220));
+                                cell.setBackgroundColor(new com.itextpdf.text.BaseColor(248, 215, 218));
+                                com.itextpdf.text.Font failFont = new com.itextpdf.text.Font(
+                                    com.itextpdf.text.Font.FontFamily.HELVETICA, dataFontSize, com.itextpdf.text.Font.BOLD,
+                                    new com.itextpdf.text.BaseColor(220, 53, 69));
+                                cell.setPhrase(new com.itextpdf.text.Phrase(cellValue, failFont));
                             }
                         }
+                        
+                        // Subtle borders
+                        cell.setBorderWidth(0.3f);
+                        cell.setBorderColor(new com.itextpdf.text.BaseColor(222, 226, 230));
                         
                         pdfTable.addCell(cell);
                     }
                 }
                 
                 document.add(pdfTable);
+                
+                // ============ FOOTER SECTION ============
+                document.add(new Paragraph("\n"));
+                com.itextpdf.text.Font footerFont = new com.itextpdf.text.Font(
+                    com.itextpdf.text.Font.FontFamily.HELVETICA, 8, com.itextpdf.text.Font.ITALIC,
+                    new com.itextpdf.text.BaseColor(108, 117, 125));
+                Paragraph footer = new Paragraph(
+                    "This is a computer-generated report | Total Records: " + resultTable.getRowCount(),
+                    footerFont
+                );
+                footer.setAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
+                document.add(footer);
+                
                 document.close();
                 
                 showStyledMessage("Data exported successfully to:\n" + filePath, "Export Successful", JOptionPane.INFORMATION_MESSAGE);
@@ -2278,6 +2572,7 @@ public class ViewSelectionTool extends JPanel {
         Map<String, List<String>> subjectFailedComponents; // Subject -> list of failed exam types
         Map<String, Boolean> subjectPassStatus; // Subject -> pass/fail
         Map<String, List<String>> subjectExamTypes; // Subject -> list of exam type names
+        Map<String, Map<String, Integer>> subjectMaxMarks; // Subject -> (ExamType -> max marks)
         String launchedResultsInfo; // Comma-separated list of launched result names
         String launchDate; // Date when result was launched
         
@@ -2287,6 +2582,7 @@ public class ViewSelectionTool extends JPanel {
             subjectFailedComponents = new HashMap<>();
             subjectPassStatus = new HashMap<>();
             subjectExamTypes = new HashMap<>();
+            subjectMaxMarks = new HashMap<>();
             launchedResultsInfo = "";
         }
     }
