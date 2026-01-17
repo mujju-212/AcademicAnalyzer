@@ -261,9 +261,12 @@ Tester: ________________
 1. Stop application
 2. Restore database backup:
    ```powershell
-   mysql -u root -pmk0492 academic_analyzer < backup_before_cleanup_[timestamp].sql
+   mysql -u root -p academic_analyzer < backup_before_cleanup_[timestamp].sql
+   # You will be prompted for password
    ```
 3. Revert code changes from git (if tracked)
+
+**Note:** Database credentials are stored in `CREDENTIALS_REFERENCE.md` (not committed to version control)
 
 ### Debug Steps:
 1. Check console for SQL errors

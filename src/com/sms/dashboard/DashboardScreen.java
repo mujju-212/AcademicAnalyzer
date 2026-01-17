@@ -24,7 +24,6 @@ import com.sms.dashboard.components.SectionCardPanel;
 import com.sms.dashboard.components.GradeDistributionPanel;
 import com.sms.dashboard.dialogs.CreateSectionDialog;
 import com.sms.dashboard.dialogs.CreateSectionPanel;
-import com.sms.dashboard.dialogs.ModernStudentEntryDialog;
 import com.sms.dashboard.components.YearSemesterPanel;
 import com.sms.dashboard.dialogs.MarkEntryDialog;
 import com.sms.dashboard.dialogs.StudentEntryDialog;

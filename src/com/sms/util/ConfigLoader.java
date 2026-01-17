@@ -189,4 +189,11 @@ public class ConfigLoader {
     public static String getMailerSendFromName() {
         return get("MAILERSEND_FROM_NAME", "Academic Analyzer");
     }
+    
+    /**
+     * Get Result Portal URL
+     */
+    public static String getResultPortalUrl() {
+        return get("RESULT_PORTAL_URL", "http://localhost:5000");
+    }
 }

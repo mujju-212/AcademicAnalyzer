@@ -119,8 +119,11 @@ DROP DATABASE academic_analyzer;
 
 -- Restore from backup
 CREATE DATABASE academic_analyzer;
-mysql -u root -pmk0492 academic_analyzer < backup_before_cleanup_20260110_194428.sql
+mysql -u root -p academic_analyzer < backup_before_cleanup_20260110_194428.sql
+# You will be prompted for password
 ```
+
+**Note:** Database credentials are stored in `CREDENTIALS_REFERENCE.md` (not committed to version control)
 
 ---
 

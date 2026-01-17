@@ -169,6 +169,13 @@ coverage/
 .env.local
 .env.*.local
 
+# Credentials and sensitive information
+CREDENTIALS_REFERENCE.md
+SECURITY_CLEANUP_SUMMARY.md
+credentials.md
+*credentials*
+*CREDENTIALS*
+
 # OS generated files
 .DS_Store?
 

@@ -246,48 +246,96 @@ public class EmailService {
     }
     
     /**
-     * Build HTML email content.
+     * Build HTML email content with professional template.
      */
     private static String buildHtmlEmail(String studentName, String launchName, String customMessage) {
+        String portalUrl = ConfigLoader.getResultPortalUrl();
         StringBuilder html = new StringBuilder();
         
         html.append("<!DOCTYPE html>");
         html.append("<html>");
         html.append("<head>");
+        html.append("<meta charset='UTF-8'>");
+        html.append("<meta name='viewport' content='width=device-width, initial-scale=1.0'>");
         html.append("<style>");
-        html.append("body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; }");
-        html.append(".container { max-width: 600px; margin: 0 auto; padding: 20px; }");
-        html.append(".header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }");
-        html.append(".content { background: #f8f9fa; padding: 30px; border-radius: 0 0 10px 10px; }");
-        html.append(".button { display: inline-block; padding: 12px 30px; background: #667eea; color: white; text-decoration: none; border-radius: 5px; margin: 20px 0; }");
-        html.append(".footer { text-align: center; margin-top: 20px; color: #6c757d; font-size: 12px; }");
+        html.append("body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; background-color: #f4f4f4; margin: 0; padding: 0; }");
+        html.append(".email-wrapper { max-width: 600px; margin: 20px auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }");
+        html.append(".header { background: linear-gradient(135deg, #4285f4 0%, #34a853 100%); color: white; padding: 40px 30px; text-align: center; }");
+        html.append(".header h1 { margin: 0; font-size: 28px; font-weight: 600; }");
+        html.append(".header p { margin: 10px 0 0 0; font-size: 14px; opacity: 0.9; }");
+        html.append(".content { padding: 40px 30px; background: #ffffff; }");
+        html.append(".greeting { font-size: 16px; color: #333; margin-bottom: 20px; }");
+        html.append(".info-box { background: #f8f9fa; border-left: 4px solid #4285f4; padding: 20px; margin: 25px 0; border-radius: 4px; }");
+        html.append(".info-box h3 { margin: 0 0 10px 0; font-size: 16px; color: #4285f4; }");
+        html.append(".message-box { background: #fff3cd; border-left: 4px solid #ffc107; padding: 20px; margin: 25px 0; border-radius: 4px; }");
+        html.append(".message-box h3 { margin: 0 0 10px 0; font-size: 16px; color: #856404; }");
+        html.append(".message-box p { margin: 0; color: #856404; line-height: 1.5; }");
+        html.append(".button { display: inline-block; padding: 14px 32px; background: #4285f4; color: white !important; text-decoration: none; border-radius: 6px; margin: 25px 0; font-weight: 600; text-align: center; transition: background 0.3s; }");
+        html.append(".button:hover { background: #3367d6; }");
+        html.append(".link-text { font-size: 13px; color: #6c757d; margin-top: 15px; word-break: break-all; }");
+        html.append(".link-url { background: #e9ecef; padding: 12px; display: block; margin-top: 10px; border-radius: 4px; color: #495057; font-family: monospace; font-size: 12px; }");
+        html.append(".footer { background: #f8f9fa; padding: 30px; text-align: center; border-top: 1px solid #dee2e6; }");
+        html.append(".footer p { margin: 5px 0; color: #6c757d; font-size: 13px; }");
+        html.append(".footer .brand { color: #4285f4; font-weight: 600; }");
+        html.append(".divider { height: 1px; background: #dee2e6; margin: 25px 0; }");
+        html.append("@media only screen and (max-width: 600px) { .content { padding: 30px 20px; } .header { padding: 30px 20px; } }");
         html.append("</style>");
         html.append("</head>");
         html.append("<body>");
-        html.append("<div class='container'>");
-        html.append("<div class='header'>");
-        html.append("<h1>📊 Results Published</h1>");
-        html.append("</div>");
-        html.append("<div class='content'>");
-        html.append("<p>Dear <strong>").append(studentName).append("</strong>,</p>");
-        html.append("<p>Your results for <strong>").append(launchName).append("</strong> have been published and are now available for viewing.</p>");
+        html.append("<div class='email-wrapper'>");
         
+        // Header
+        html.append("<div class='header'>");
+        html.append("<h1>🎓 Academic Results Published</h1>");
+        html.append("<p>Your academic performance is now available</p>");
+        html.append("</div>");
+        
+        // Content
+        html.append("<div class='content'>");
+        html.append("<p class='greeting'>Dear <strong>").append(studentName).append("</strong>,</p>");
+        html.append("<p>We are pleased to inform you that your academic results have been published and are now available for viewing.</p>");
+        
+        // Result Info Box
+        html.append("<div class='info-box'>");
+        html.append("<h3>📊 Result Details</h3>");
+        html.append("<p><strong>Assessment:</strong> ").append(launchName).append("</p>");
+        html.append("<p><strong>Status:</strong> Published</p>");
+        html.append("</div>");
+        
+        // Custom Message (if any)
         if (customMessage != null && !customMessage.isEmpty()) {
-            html.append("<div style='background: white; padding: 15px; border-left: 4px solid #667eea; margin: 20px 0;'>");
-            html.append("<p><strong>Message from your teacher:</strong></p>");
+            html.append("<div class='message-box'>");
+            html.append("<h3>📝 Message from your Instructor</h3>");
             html.append("<p>").append(customMessage.replace("\n", "<br>")).append("</p>");
             html.append("</div>");
         }
         
-        html.append("<p>To view your results, please log in to the student portal:</p>");
-        html.append("<a href='#' class='button'>View My Results</a>");
-        html.append("<p style='color: #6c757d; font-size: 14px;'>If the button doesn't work, copy and paste this link into your browser:<br>");
-        html.append("<code style='background: #e9ecef; padding: 5px; display: block; margin-top: 10px;'>https://your-portal-url.com/student/results</code></p>");
+        html.append("<div class='divider'></div>");
+        
+        // Call to Action
+        html.append("<p>Access your results by clicking the button below:</p>");
+        html.append("<center>");
+        html.append("<a href='").append(portalUrl).append("/results' class='button'>View My Results</a>");
+        html.append("</center>");
+        
+        // Alternative Link
+        html.append("<p class='link-text'>Or copy and paste this link into your browser:</p>");
+        html.append("<div class='link-url'>").append(portalUrl).append("/results</div>");
+        
+        html.append("<div class='divider'></div>");
+        
+        html.append("<p style='font-size: 13px; color: #6c757d;'>");
+        html.append("<strong>Need help?</strong> If you have any questions about your results, please contact your instructor or the academic office.");
+        html.append("</p>");
         html.append("</div>");
+        
+        // Footer
         html.append("<div class='footer'>");
-        html.append("<p>This is an automated email from Academic Analyzer. Please do not reply to this email.</p>");
-        html.append("<p>&copy; 2026 Academic Analyzer. All rights reserved.</p>");
+        html.append("<p>This is an automated notification from <span class='brand'>Academic Analyzer</span></p>");
+        html.append("<p>Please do not reply to this email.</p>");
+        html.append("<p style='margin-top: 15px;'>&copy; 2026 Academic Analyzer. All rights reserved.</p>");
         html.append("</div>");
+        
         html.append("</div>");
         html.append("</body>");
         html.append("</html>");
@@ -299,23 +347,39 @@ public class EmailService {
      * Build plain text email content.
      */
     private static String buildPlainEmail(String studentName, String launchName, String customMessage) {
+        String portalUrl = ConfigLoader.getResultPortalUrl();
         StringBuilder plain = new StringBuilder();
         
-        plain.append("RESULTS PUBLISHED\n");
-        plain.append("==================\n\n");
+        plain.append("=============================================\n");
+        plain.append("   ACADEMIC RESULTS PUBLISHED\n");
+        plain.append("=============================================\n\n");
+        
         plain.append("Dear ").append(studentName).append(",\n\n");
-        plain.append("Your results for '").append(launchName).append("' have been published and are now available for viewing.\n\n");
+        
+        plain.append("We are pleased to inform you that your academic results have been published and are now available for viewing.\n\n");
+        
+        plain.append("RESULT DETAILS\n");
+        plain.append("------------------------------------------\n");
+        plain.append("Assessment: ").append(launchName).append("\n");
+        plain.append("Status: Published\n\n");
         
         if (customMessage != null && !customMessage.isEmpty()) {
-            plain.append("MESSAGE FROM YOUR TEACHER:\n");
-            plain.append("---------------------------\n");
+            plain.append("MESSAGE FROM YOUR INSTRUCTOR\n");
+            plain.append("------------------------------------------\n");
             plain.append(customMessage).append("\n\n");
         }
         
-        plain.append("To view your results, please log in to the student portal at:\n");
-        plain.append("https://your-portal-url.com/student/results\n\n");
+        plain.append("ACCESS YOUR RESULTS\n");
+        plain.append("------------------------------------------\n");
+        plain.append("Visit the student portal to view your results:\n");
+        plain.append(portalUrl).append("/results\n\n");
+        
+        plain.append("NEED HELP?\n");
+        plain.append("------------------------------------------\n");
+        plain.append("If you have any questions about your results, please contact your instructor or the academic office.\n\n");
+        
         plain.append("--\n");
-        plain.append("This is an automated email from Academic Analyzer.\n");
+        plain.append("This is an automated notification from Academic Analyzer.\n");
         plain.append("Please do not reply to this email.\n\n");
         plain.append("© 2026 Academic Analyzer. All rights reserved.\n");
         

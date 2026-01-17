@@ -60,15 +60,18 @@ WHERE `academic_year` IS NULL OR `semester` IS NULL;
 ### 3. Recreated Database
 Dropped and recreated the entire database using the updated schema:
 ```bash
-mysql -u root -pmk0492 -e "DROP DATABASE IF EXISTS academic_analyzer; CREATE DATABASE academic_analyzer;"
-Get-Content dump1.sql | mysql -u root -pmk0492 academic_analyzer
+mysql -u root -p -e "DROP DATABASE IF EXISTS academic_analyzer; CREATE DATABASE academic_analyzer;"
+# You will be prompted for password
+Get-Content dump1.sql | mysql -u root -p academic_analyzer
 ```
 
 ## Verification
 Verified the table structure:
 ```bash
-mysql -u root -pmk0492 -e "USE academic_analyzer; DESC sections;"
+mysql -u root -p -e "USE academic_analyzer; DESC sections;"
 ```
+
+**Note:** Database credentials are stored in `CREDENTIALS_REFERENCE.md` (not committed to version control)
 
 Result shows the new columns:
 ```

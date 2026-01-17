@@ -7,17 +7,19 @@ import javax.swing.border.*;
 import com.formdev.flatlaf.FlatLightLaf;
 import java.sql.*;
 import java.util.Random;
-import java.net.http.*;
-import java.net.URI;
+import java.io.OutputStreamWriter;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import com.sms.util.ConfigLoader;
 import com.sms.database.DatabaseConnection;
 
 public class CreateAccountScreen extends JFrame {
     
-    // EmailJS Configuration loaded from environment
-    private static final String EMAILJS_SERVICE_ID = ConfigLoader.getEmailJsServiceId();
-    private static final String EMAILJS_TEMPLATE_ID = ConfigLoader.getEmailJsTemplateId();
-    private static final String EMAILJS_PUBLIC_KEY = ConfigLoader.getEmailJsPublicKey();
+    // MailerSend Configuration loaded from environment
+    private static final String MAILERSEND_API_KEY = ConfigLoader.getMailerSendApiKey();
+    private static final String MAILERSEND_FROM_EMAIL = ConfigLoader.getMailerSendFromEmail();
+    private static final String MAILERSEND_FROM_NAME = ConfigLoader.getMailerSendFromName();
     
     // Reuse the custom components from LoginScreen
     static class RoundedPanel extends JPanel {
@@ -550,41 +552,119 @@ public class CreateAccountScreen extends JFrame {
     
     private boolean sendEmailViaEmailJS(String toEmail, String otp) {
         try {
-            HttpClient client = HttpClient.newHttpClient();
+            URL url = new URL("https://api.mailersend.com/v1/email");
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             
-            // Create JSON payload
-            String jsonPayload = String.format(
-                "{\"service_id\":\"%s\"," +
-                "\"template_id\":\"%s\"," +
-                "\"user_id\":\"%s\"," +
-                "\"template_params\":{" +
-                    "\"to_email\":\"%s\"," +
-                    "\"otp\":\"%s\"" +
-                "}}",
-                EMAILJS_SERVICE_ID,
-                EMAILJS_TEMPLATE_ID,
-                EMAILJS_PUBLIC_KEY,
-                toEmail,
-                otp
-            );
+            conn.setRequestMethod("POST");
+            conn.setRequestProperty("Content-Type", "application/json");
+            conn.setRequestProperty("Authorization", "Bearer " + MAILERSEND_API_KEY);
+            conn.setDoOutput(true);
             
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create("https://api.emailjs.com/api/v1.0/email/send"))
-                .header("Content-Type", "application/json")
-                .header("origin", "http://localhost")
-                .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
-                .build();
+            // Build professional HTML email for OTP
+            String htmlContent = buildOTPHtmlEmail(otp);
+            String plainContent = buildOTPPlainEmail(otp);
             
-            HttpResponse<String> response = client.send(request, 
-                HttpResponse.BodyHandlers.ofString());
+            // Build JSON payload
+            String jsonPayload = buildOTPJsonPayload(toEmail, htmlContent, plainContent);
             
-            return response.statusCode() == 200;
+            // Send request
+            try (OutputStreamWriter writer = new OutputStreamWriter(conn.getOutputStream(), StandardCharsets.UTF_8)) {
+                writer.write(jsonPayload);
+                writer.flush();
+            }
+            
+            // Check response
+            int responseCode = conn.getResponseCode();
+            
+            if (responseCode == 202 || responseCode == 200) {
+                System.out.println("✅ OTP email sent successfully via MailerSend");
+                return true;
+            } else {
+                System.err.println("❌ MailerSend API error: HTTP " + responseCode);
+                return false;
+            }
             
         } catch (Exception e) {
-            System.err.println("Error sending email via EmailJS: " + e.getMessage());
+            System.err.println("❌ Error sending OTP email: " + e.getMessage());
             e.printStackTrace();
             return false;
         }
+    }
+    
+    private String buildOTPHtmlEmail(String otp) {
+        StringBuilder html = new StringBuilder();
+        html.append("<!DOCTYPE html><html><head><meta charset='UTF-8'>");
+        html.append("<style>");
+        html.append("body{font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;line-height:1.6;color:#333;background:#f4f4f4;margin:0;padding:0;}");
+        html.append(".container{max-width:600px;margin:20px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.1);}");
+        html.append(".header{background:linear-gradient(135deg,#4285f4 0%,#34a853 100%);color:#fff;padding:40px 30px;text-align:center;}");
+        html.append(".header h1{margin:0;font-size:28px;font-weight:600;}");
+        html.append(".content{padding:40px 30px;}");
+        html.append(".otp-box{background:#f8f9fa;border:2px dashed #4285f4;padding:30px;margin:25px 0;text-align:center;border-radius:8px;}");
+        html.append(".otp-code{font-size:36px;font-weight:700;color:#4285f4;letter-spacing:8px;font-family:monospace;margin:10px 0;}");
+        html.append(".info-box{background:#fff3cd;border-left:4px solid #ffc107;padding:15px;margin:20px 0;border-radius:4px;}");
+        html.append(".footer{background:#f8f9fa;padding:30px;text-align:center;border-top:1px solid #dee2e6;}");
+        html.append(".footer p{margin:5px 0;color:#6c757d;font-size:13px;}");
+        html.append("</style></head><body><div class='container'>");
+        html.append("<div class='header'><h1>🔐 Email Verification</h1><p>Secure your account with OTP</p></div>");
+        html.append("<div class='content'>");
+        html.append("<p>Dear User,</p>");
+        html.append("<p>Thank you for creating an account with <strong>Academic Analyzer</strong>. To complete your registration, please verify your email address using the One-Time Password (OTP) below.</p>");
+        html.append("<div class='otp-box'><p style='margin:0;color:#6c757d;font-size:14px;'>Your Verification Code</p>");
+        html.append("<div class='otp-code'>").append(otp).append("</div>");
+        html.append("<p style='margin:0;color:#6c757d;font-size:12px;'>Valid for 10 minutes</p></div>");
+        html.append("<div class='info-box'><p style='margin:0;color:#856404;font-size:13px;'>");
+        html.append("<strong>⚠️ Security Notice:</strong> Never share this OTP with anyone. Our team will never ask for this code.");
+        html.append("</p></div>");
+        html.append("<p style='font-size:13px;color:#6c757d;'>If you didn't request this verification, please ignore this email or contact support if you have concerns.</p>");
+        html.append("</div>");
+        html.append("<div class='footer'>");
+        html.append("<p>This is an automated notification from <span style='color:#4285f4;font-weight:600;'>Academic Analyzer</span></p>");
+        html.append("<p>&copy; 2026 Academic Analyzer. All rights reserved.</p>");
+        html.append("</div></div></body></html>");
+        return html.toString();
+    }
+    
+    private String buildOTPPlainEmail(String otp) {
+        StringBuilder plain = new StringBuilder();
+        plain.append("=============================================\n");
+        plain.append("   EMAIL VERIFICATION - ACADEMIC ANALYZER\n");
+        plain.append("=============================================\n\n");
+        plain.append("Dear User,\n\n");
+        plain.append("Thank you for creating an account with Academic Analyzer.\n");
+        plain.append("To complete your registration, please verify your email address using the OTP below.\n\n");
+        plain.append("YOUR VERIFICATION CODE\n");
+        plain.append("------------------------------------------\n");
+        plain.append("        ").append(otp).append("\n");
+        plain.append("------------------------------------------\n");
+        plain.append("Valid for 10 minutes\n\n");
+        plain.append("SECURITY NOTICE\n");
+        plain.append("------------------------------------------\n");
+        plain.append("Never share this OTP with anyone. Our team will never ask for this code.\n\n");
+        plain.append("If you didn't request this verification, please ignore this email.\n\n");
+        plain.append("--\n");
+        plain.append("This is an automated notification from Academic Analyzer.\n");
+        plain.append("© 2026 Academic Analyzer. All rights reserved.\n");
+        return plain.toString();
+    }
+    
+    private String buildOTPJsonPayload(String toEmail, String htmlContent, String plainContent) {
+        return "{" +
+            "\"from\":{\"email\":\"" + escapeJson(MAILERSEND_FROM_EMAIL) + "\",\"name\":\"" + escapeJson(MAILERSEND_FROM_NAME) + "\"}," +
+            "\"to\":[{\"email\":\"" + escapeJson(toEmail) + "\"}]," +
+            "\"subject\":\"Verify Your Email - Academic Analyzer\"," +
+            "\"text\":\"" + escapeJson(plainContent) + "\"," +
+            "\"html\":\"" + escapeJson(htmlContent) + "\"" +
+            "}";
+    }
+    
+    private String escapeJson(String str) {
+        if (str == null) return "";
+        return str.replace("\\", "\\\\")
+                  .replace("\"", "\\\"")
+                  .replace("\n", "\\n")
+                  .replace("\r", "\\r")
+                  .replace("\t", "\\t");
     }
     
     private String generateOTP() {

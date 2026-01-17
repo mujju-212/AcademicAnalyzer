@@ -8,17 +8,19 @@ import javax.swing.border.*;
 import com.formdev.flatlaf.FlatLightLaf;
 import java.util.Random;
 import java.sql.*;
-import java.net.http.*;
-import java.net.URI;
+import java.io.OutputStreamWriter;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import com.sms.util.ConfigLoader;
 import com.sms.database.DatabaseConnection;
 
 public class ForgotPasswordScreen extends JFrame {
     
-    // EmailJS Configuration loaded from environment
-    private static final String EMAILJS_SERVICE_ID = ConfigLoader.getEmailJsServiceId();
-    private static final String EMAILJS_TEMPLATE_ID = ConfigLoader.getEmailJsTemplateId();
-    private static final String EMAILJS_PUBLIC_KEY = ConfigLoader.getEmailJsPublicKey();
+    // MailerSend Configuration loaded from environment
+    private static final String MAILERSEND_API_KEY = ConfigLoader.getMailerSendApiKey();
+    private static final String MAILERSEND_FROM_EMAIL = ConfigLoader.getMailerSendFromEmail();
+    private static final String MAILERSEND_FROM_NAME = ConfigLoader.getMailerSendFromName();
     
     // Reuse custom components from CreateAccountScreen
     static class RoundedPanel extends JPanel {
@@ -340,54 +342,132 @@ public class ForgotPasswordScreen extends JFrame {
     
     private boolean sendEmailViaEmailJS(String toEmail, String otp) {
         try {
-            HttpClient client = HttpClient.newHttpClient();
+            URL url = new URL("https://api.mailersend.com/v1/email");
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             
-            // Create JSON payload
-            String jsonPayload = String.format(
-                "{\"service_id\":\"%s\"," +
-                "\"template_id\":\"%s\"," +
-                "\"user_id\":\"%s\"," +
-                "\"template_params\":{" +
-                    "\"to_email\":\"%s\"," +
-                    "\"otp\":\"%s\"" +
-                "}}",
-                EMAILJS_SERVICE_ID,
-                EMAILJS_TEMPLATE_ID,
-                EMAILJS_PUBLIC_KEY,
-                toEmail,
-                otp
-            );
+            conn.setRequestMethod("POST");
+            conn.setRequestProperty("Content-Type", "application/json");
+            conn.setRequestProperty("Authorization", "Bearer " + MAILERSEND_API_KEY);
+            conn.setDoOutput(true);
             
-            System.out.println("Sending email to: " + toEmail);
-            System.out.println("OTP: " + otp);
+            // Build professional HTML email for password reset OTP
+            String htmlContent = buildPasswordResetOTPHtml(otp);
+            String plainContent = buildPasswordResetOTPPlain(otp);
             
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create("https://api.emailjs.com/api/v1.0/email/send"))
-                .header("Content-Type", "application/json")
-                .header("origin", "http://localhost")
-                .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
-                .build();
+            // Build JSON payload
+            String jsonPayload = buildJsonPayload(toEmail, htmlContent, plainContent);
             
-            HttpResponse<String> response = client.send(request, 
-                HttpResponse.BodyHandlers.ofString());
+            // Send request
+            try (OutputStreamWriter writer = new OutputStreamWriter(conn.getOutputStream(), StandardCharsets.UTF_8)) {
+                writer.write(jsonPayload);
+                writer.flush();
+            }
             
-            System.out.println("Response status: " + response.statusCode());
-            System.out.println("Response body: " + response.body());
+            // Check response
+            int responseCode = conn.getResponseCode();
             
-            if (response.statusCode() == 200) {
-                System.out.println("Email sent successfully via EmailJS!");
+            if (responseCode == 202 || responseCode == 200) {
+                System.out.println("✅ Password reset OTP sent successfully via MailerSend");
                 return true;
             } else {
-                System.err.println("EmailJS failed with status: " + response.statusCode());
-                System.err.println("Response: " + response.body());
+                System.err.println("❌ MailerSend API error: HTTP " + responseCode);
                 return false;
             }
             
         } catch (Exception e) {
-            System.err.println("Error sending email via EmailJS: " + e.getMessage());
+            System.err.println("❌ Error sending password reset OTP: " + e.getMessage());
             e.printStackTrace();
             return false;
         }
+    }
+    
+    private String buildPasswordResetOTPHtml(String otp) {
+        StringBuilder html = new StringBuilder();
+        html.append("<!DOCTYPE html><html><head><meta charset='UTF-8'>");
+        html.append("<style>");
+        html.append("body{font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;line-height:1.6;color:#333;background:#f4f4f4;margin:0;padding:0;}");
+        html.append(".container{max-width:600px;margin:20px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.1);}");
+        html.append(".header{background:linear-gradient(135deg,#ea4335 0%,#fbbc04 100%);color:#fff;padding:40px 30px;text-align:center;}");
+        html.append(".header h1{margin:0;font-size:28px;font-weight:600;}");
+        html.append(".content{padding:40px 30px;}");
+        html.append(".otp-box{background:#f8f9fa;border:2px dashed #ea4335;padding:30px;margin:25px 0;text-align:center;border-radius:8px;}");
+        html.append(".otp-code{font-size:36px;font-weight:700;color:#ea4335;letter-spacing:8px;font-family:monospace;margin:10px 0;}");
+        html.append(".warning-box{background:#fff3cd;border-left:4px solid #ffc107;padding:15px;margin:20px 0;border-radius:4px;}");
+        html.append(".info-box{background:#d1ecf1;border-left:4px solid #0dcaf0;padding:15px;margin:20px 0;border-radius:4px;}");
+        html.append(".footer{background:#f8f9fa;padding:30px;text-align:center;border-top:1px solid #dee2e6;}");
+        html.append(".footer p{margin:5px 0;color:#6c757d;font-size:13px;}");
+        html.append("</style></head><body><div class='container'>");
+        html.append("<div class='header'><h1>🔒 Password Reset Request</h1><p>Reset your account password securely</p></div>");
+        html.append("<div class='content'>");
+        html.append("<p>Dear User,</p>");
+        html.append("<p>We received a request to reset the password for your <strong>Academic Analyzer</strong> account. Use the One-Time Password (OTP) below to proceed with resetting your password.</p>");
+        html.append("<div class='otp-box'><p style='margin:0;color:#6c757d;font-size:14px;'>Your Password Reset Code</p>");
+        html.append("<div class='otp-code'>").append(otp).append("</div>");
+        html.append("<p style='margin:0;color:#6c757d;font-size:12px;'>Valid for 10 minutes</p></div>");
+        html.append("<div class='warning-box'><p style='margin:0;color:#856404;font-size:13px;'>");
+        html.append("<strong>⚠️ Security Alert:</strong> If you didn't request a password reset, please ignore this email and ensure your account is secure. Never share this OTP with anyone.");
+        html.append("</p></div>");
+        html.append("<div class='info-box'><p style='margin:0;color:#055160;font-size:13px;'>");
+        html.append("<strong>🛈 Security Tips:</strong><br>");
+        html.append("• Use a strong, unique password<br>");
+        html.append("• Never share your password with anyone<br>");
+        html.append("• Enable two-factor authentication when available");
+        html.append("</p></div>");
+        html.append("</div>");
+        html.append("<div class='footer'>");
+        html.append("<p>This is an automated notification from <span style='color:#4285f4;font-weight:600;'>Academic Analyzer</span></p>");
+        html.append("<p>If you have concerns about your account security, please contact support immediately.</p>");
+        html.append("<p>&copy; 2026 Academic Analyzer. All rights reserved.</p>");
+        html.append("</div></div></body></html>");
+        return html.toString();
+    }
+    
+    private String buildPasswordResetOTPPlain(String otp) {
+        StringBuilder plain = new StringBuilder();
+        plain.append("=============================================\n");
+        plain.append("   PASSWORD RESET - ACADEMIC ANALYZER\n");
+        plain.append("=============================================\n\n");
+        plain.append("Dear User,\n\n");
+        plain.append("We received a request to reset the password for your Academic Analyzer account.\n");
+        plain.append("Use the OTP below to proceed with resetting your password.\n\n");
+        plain.append("YOUR PASSWORD RESET CODE\n");
+        plain.append("------------------------------------------\n");
+        plain.append("        ").append(otp).append("\n");
+        plain.append("------------------------------------------\n");
+        plain.append("Valid for 10 minutes\n\n");
+        plain.append("SECURITY ALERT\n");
+        plain.append("------------------------------------------\n");
+        plain.append("If you didn't request a password reset, please ignore this email and ensure\n");
+        plain.append("your account is secure. Never share this OTP with anyone.\n\n");
+        plain.append("SECURITY TIPS\n");
+        plain.append("------------------------------------------\n");
+        plain.append("* Use a strong, unique password\n");
+        plain.append("* Never share your password with anyone\n");
+        plain.append("* Enable two-factor authentication when available\n\n");
+        plain.append("--\n");
+        plain.append("This is an automated notification from Academic Analyzer.\n");
+        plain.append("If you have concerns about your account security, contact support immediately.\n\n");
+        plain.append("© 2026 Academic Analyzer. All rights reserved.\n");
+        return plain.toString();
+    }
+    
+    private String buildJsonPayload(String toEmail, String htmlContent, String plainContent) {
+        return "{" +
+            "\"from\":{\"email\":\"" + escapeJson(MAILERSEND_FROM_EMAIL) + "\",\"name\":\"" + escapeJson(MAILERSEND_FROM_NAME) + "\"}," +
+            "\"to\":[{\"email\":\"" + escapeJson(toEmail) + "\"}]," +
+            "\"subject\":\"Password Reset Request - Academic Analyzer\"," +
+            "\"text\":\"" + escapeJson(plainContent) + "\"," +
+            "\"html\":\"" + escapeJson(htmlContent) + "\"" +
+            "}";
+    }
+    
+    private String escapeJson(String str) {
+        if (str == null) return "";
+        return str.replace("\\", "\\\\")
+                  .replace("\"", "\\\"")
+                  .replace("\n", "\\n")
+                  .replace("\r", "\\r")
+                  .replace("\t", "\\t");
     }
     
     private String generateOTP() {
