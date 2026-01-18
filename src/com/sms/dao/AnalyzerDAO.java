@@ -2074,8 +2074,6 @@ public class AnalyzerDAO {
                     "JOIN marking_schemes ms ON mc.scheme_id = ms.id " +
                     "WHERE ms.section_id = ? AND ms.subject_id = ? AND ms.is_active = 1 " +
                     "ORDER BY mc.sequence_order, mc.component_name";
-                
-                System.out.println("@@@ QUERYING marking_components for sectionId=" + sectionId + ", subjectId=" + subjectId + " @@@");
                 PreparedStatement ps2 = conn.prepareStatement(componentQuery);
                 ps2.setInt(1, sectionId);
                 ps2.setInt(2, subjectId);
@@ -2092,9 +2090,6 @@ public class AnalyzerDAO {
                         // Weightage is the scaled marks (weighted component out of 100 total)
                         examTypeWeightage.put(componentName, scaledMarks);
                         hasComponents = true;
-                        System.out.println("@@@ EXAM TYPE DEBUG: " + componentName + 
-                            " | actual_max_marks=" + actualMaxMarks + 
-                            " | scaled_to_marks=" + scaledMarks + " @@@");
                     }
                 }
                 rs2.close();
@@ -2104,7 +2099,6 @@ public class AnalyzerDAO {
                 
                 // If no components found in new system, get from old system (entered_exam_marks)
                 if (!hasComponents) {
-                    System.out.println("@@@ NO COMPONENTS FOUND - Falling back to old system @@@");
                     String examTypeQuery1 = 
                         "SELECT DISTINCT et.exam_name, et.max_marks " +
                         "FROM entered_exam_marks sm " +
@@ -2124,7 +2118,6 @@ public class AnalyzerDAO {
                         if (examType != null && !examType.trim().isEmpty()) {
                             examTypes.add(examType);
                             examTypeMaxMarks.put(examType, maxMarks);
-                            System.out.println("@@@ OLD SYSTEM: " + examType + " | max_marks=" + maxMarks + " @@@");
                         }
                     }
                     rs3.close();

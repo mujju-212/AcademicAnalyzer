@@ -262,8 +262,6 @@ public class YearSemesterPanel extends JPanel {
     }
     
     private void addClickHandlerToCard(SectionCardPanel card, SectionInfo section) {
-        System.out.println("@@@ ADDING CLICK HANDLER TO CARD: " + section.sectionName + " @@@");
-        
         // Add combined mouse listener for both click and hover
         MouseAdapter clickListener = new MouseAdapter() {
             @Override
@@ -271,7 +269,6 @@ public class YearSemesterPanel extends JPanel {
                 System.out.println("@@@ MOUSE CLICKED EVENT: button=" + e.getButton() + ", section=" + section.sectionName + " @@@");
                 // Only trigger on left-click, not right-click (which opens context menu)
                 if (e.getButton() == MouseEvent.BUTTON1) {
-                    System.out.println("@@@ OPENING SECTION RANKING FOR: " + section.sectionName + " @@@");
                     openSectionRanking(section);
                 }
             }
@@ -292,12 +289,9 @@ public class YearSemesterPanel extends JPanel {
         };
         
         card.addMouseListener(clickListener);
-        System.out.println("@@@ CLICK HANDLER ADDED TO CARD: " + section.sectionName + " @@@");
     }
     
     private void openSectionRanking(SectionInfo section) {
-        System.out.println("@@@ OPENING RANKING TABLE FOR: " + section.sectionName + " @@@");
-        
         // Get the DashboardScreen instance
         Window window = SwingUtilities.getWindowAncestor(this);
         if (window instanceof com.sms.dashboard.DashboardScreen) {

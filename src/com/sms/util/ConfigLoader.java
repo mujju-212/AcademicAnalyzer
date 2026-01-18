@@ -19,13 +19,48 @@ public class ConfigLoader {
         if (initialized) return;
         
         try {
-            // Try to load from .env file first
-            File envFile = new File(".env");
-            if (envFile.exists()) {
-                loadFromFile(envFile);
-                System.out.println("Configuration loaded from .env file");
-            } else {
-                System.out.println("No .env file found, using environment variables");
+            boolean loaded = false;
+            
+            // Try 1: Look for .env next to the JAR file (for installed apps)
+            try {
+                String jarPath = ConfigLoader.class.getProtectionDomain().getCodeSource().getLocation().toURI().getPath();
+                File jarFile = new File(jarPath);
+                File jarDir = jarFile.getParentFile();
+                File envFile = new File(jarDir, ".env");
+                
+                if (envFile.exists()) {
+                    loadFromFile(envFile);
+                    System.out.println("Configuration loaded from .env file next to JAR: " + envFile.getAbsolutePath());
+                    loaded = true;
+                }
+            } catch (Exception e) {
+                System.err.println("Could not check for .env next to JAR: " + e.getMessage());
+            }
+            
+            // Try 2: Look for .env in current working directory
+            if (!loaded) {
+                File envFile = new File(".env");
+                if (envFile.exists()) {
+                    loadFromFile(envFile);
+                    System.out.println("Configuration loaded from .env file in current directory: " + envFile.getAbsolutePath());
+                    loaded = true;
+                }
+            }
+            
+            // Try 3: Load from classpath resource (inside JAR)
+            if (!loaded) {
+                System.out.println("No external .env file found, trying classpath...");
+                if (loadFromClasspath()) {
+                    loaded = true;
+                } else {
+                    System.out.println("No .env found in classpath either");
+                }
+            }
+            
+            if (!loaded) {
+                System.err.println("WARNING: No .env file found in any location!");
+                System.err.println("Working directory: " + System.getProperty("user.dir"));
+                System.err.println("Using environment variables or defaults");
             }
             
             // Override with system environment variables if they exist
@@ -36,6 +71,40 @@ public class ConfigLoader {
         } catch (Exception e) {
             System.err.println("Error loading configuration: " + e.getMessage());
             e.printStackTrace();
+        }
+    }
+    
+    private static boolean loadFromClasspath() {
+        try (InputStream is = ConfigLoader.class.getResourceAsStream("/.env")) {
+            if (is == null) {
+                return false;
+            }
+            
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(is))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    line = line.trim();
+                    
+                    // Skip empty lines and comments
+                    if (line.isEmpty() || line.startsWith("#")) {
+                        continue;
+                    }
+                    
+                    // Parse key=value pairs
+                    int equalsIndex = line.indexOf('=');
+                    if (equalsIndex > 0) {
+                        String key = line.substring(0, equalsIndex).trim();
+                        String value = line.substring(equalsIndex + 1).trim();
+                        config.put(key, value);
+                    }
+                }
+            }
+            
+            System.out.println("Configuration loaded from classpath .env resource");
+            return true;
+        } catch (IOException e) {
+            System.err.println("Error loading .env from classpath: " + e.getMessage());
+            return false;
         }
     }
     
@@ -119,7 +188,13 @@ public class ConfigLoader {
      * @return Complete database URL
      */
     public static String getDatabaseUrl() {
-        String host = get("DB_HOST", "localhost");
+        String host = get("DB_HOST");
+        if (host == null || host.isEmpty()) {
+            System.err.println("ERROR: DB_HOST not configured!");
+            System.err.println("Please ensure .env file is present with Azure database credentials.");
+            System.err.println("Current working directory: " + System.getProperty("user.dir"));
+            return "jdbc:mysql://localhost:3306/academic_analyzer"; // Fallback to prevent crash
+        }
         int port = getInt("DB_PORT", 3306);
         String dbName = get("DB_NAME", "academic_analyzer");
         return String.format("jdbc:mysql://%s:%d/%s", host, port, dbName);
@@ -130,7 +205,12 @@ public class ConfigLoader {
      * @return Database username
      */
     public static String getDatabaseUsername() {
-        return get("DB_USERNAME", "root");
+        String username = get("DB_USERNAME");
+        if (username == null || username.isEmpty()) {
+            System.err.println("ERROR: DB_USERNAME not configured!");
+            return "root"; // Fallback
+        }
+        return username;
     }
     
     /**
@@ -138,7 +218,25 @@ public class ConfigLoader {
      * @return Database password
      */
     public static String getDatabasePassword() {
-        return get("DB_PASSWORD", "");
+        String password = get("DB_PASSWORD");
+        if (password == null || password.isEmpty()) {
+            System.err.println("ERROR: DB_PASSWORD not configured!");
+            return ""; // Fallback
+        }
+        return password;
+    }
+    
+    /**
+     * Check if database configuration is valid
+     * @return true if all required database config is present
+     */
+    public static boolean isDatabaseConfigValid() {
+        String host = get("DB_HOST");
+        String username = get("DB_USERNAME");
+        String password = get("DB_PASSWORD");
+        return host != null && !host.isEmpty() && 
+               username != null && !username.isEmpty() &&
+               password != null && !password.isEmpty();
     }
     
     /**
@@ -194,6 +292,6 @@ public class ConfigLoader {
      * Get Result Portal URL
      */
     public static String getResultPortalUrl() {
-        return get("RESULT_PORTAL_URL", "http://localhost:5000");
+        return get("RESULT_PORTAL_URL", "https://academicanalyzer-portal.azurewebsites.net");
     }
 }

@@ -216,7 +216,6 @@ public class ResultLauncherUtils {
      */
  // In ResultLauncherUtils.java, change the method signature:
     public static JDialog showLoadingDialog(Window parent, String message) {
-        System.out.println("=== LOADING DIALOG DEBUG ===");
         System.out.println("Creating loading dialog with message: " + message);
         
         JDialog dialog = new JDialog(parent, "Loading", ModalityType.APPLICATION_MODAL);

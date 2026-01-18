@@ -962,7 +962,6 @@ public class ViewSelectionTool extends JPanel {
                     int maxMarks = rs3.getInt("max_marks");
                     if (examType != null && !examType.trim().isEmpty()) {
                         examTypeMaxMarks.put(examType, maxMarks);
-                        System.out.println("DEBUG: MaxMarks - Subject: " + subjectName + ", Exam: " + examType + ", MaxMarks: " + maxMarks);
                     }
                 }
                 rs3.close();
@@ -1186,7 +1185,6 @@ public class ViewSelectionTool extends JPanel {
             // Normal mode: fetch from selected section
             // Add data rows
             if (selectedSection.equals("All Sections")) {
-                System.out.println("DEBUG: Processing all sections");
                 System.out.println("DEBUG: Total sections: " + sectionStudents.size());
                 
                 // Display data from all sections
@@ -1203,8 +1201,6 @@ public class ViewSelectionTool extends JPanel {
                     }
                 }
             } else {
-                System.out.println("DEBUG: Processing single section: " + selectedSection);
-                
                 // Display data from selected section
                 List<Student> students = sectionStudents.get(selectedSection);
                 System.out.println("DEBUG: Students in section: " + (students != null ? students.size() : "null"));
@@ -1393,7 +1389,6 @@ public class ViewSelectionTool extends JPanel {
     
     private ExtendedStudentData getExtendedStudentData(Student student, String section, List<String> selectedSubjects) {
         if (student == null) {
-            System.out.println("DEBUG: Student is null");
             return null;
         }
         
@@ -1404,12 +1399,8 @@ public class ViewSelectionTool extends JPanel {
         data.subjectMarks = student.getMarks() != null ? student.getMarks() : new HashMap<String, Map<String, Integer>>();
         
         System.out.println("DEBUG: Processing student: " + data.name + " (" + data.rollNumber + ")");
-        System.out.println("DEBUG: Student marks: " + data.subjectMarks);
-        
         // Get section ID for this section
         int sectionId = getSectionIdByName(section);
-        System.out.println("DEBUG: Section ID for " + section + ": " + sectionId);
-        
         // Get additional info from database
         try {
             Connection conn = DatabaseConnection.getConnection();
@@ -1795,9 +1786,6 @@ public class ViewSelectionTool extends JPanel {
                 }
                 
                 System.out.println("DEBUG: Found subject: " + subjectName + " = " + weightedTotal + " (" + (passed ? "passed" : "failed") + ")");
-                System.out.println("DEBUG: Exam types: " + examTypesList);
-                System.out.println("DEBUG: Exam marks: " + examMarksMap);
-                
                 data.subjectWeightedTotals.put(subjectName, weightedTotal);
                 data.subjectPassStatus.put(subjectName, passed);
                 
@@ -1811,9 +1799,6 @@ public class ViewSelectionTool extends JPanel {
             
             // Store exam types information for display
             data.subjectExamTypes = subjectExamTypes;
-            
-            System.out.println("DEBUG: Total subjects parsed: " + subjectCount);
-            
             // Extract overall data
             if (subjectCount > 0) {
                 String overallPercentageStr = extractJsonValue(jsonData, "percentage");
@@ -2266,6 +2251,21 @@ public class ViewSelectionTool extends JPanel {
                 Document document = new Document(PageSize.A4.rotate(), 30, 30, 30, 30);
                 PdfWriter.getInstance(document, new FileOutputStream(filePath));
                 document.open();
+                
+                // Add Logo
+                try {
+                    String logoPath = "resources/images/AA LOGO.png";
+                    java.io.File logoFile = new java.io.File(logoPath);
+                    if (logoFile.exists()) {
+                        com.itextpdf.text.Image logo = com.itextpdf.text.Image.getInstance(logoPath);
+                        logo.scaleToFit(120, 72); // 150x90 scaled down proportionally
+                        logo.setAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
+                        document.add(logo);
+                        document.add(new Paragraph(" ")); // spacing
+                    }
+                } catch (Exception ex) {
+                    // If logo not found, continue without it
+                }
                 
                 // ============ MODERN HEADER SECTION ============
                 // Institution name

@@ -32,8 +32,6 @@ public class StudentCalculator {
         
         // Analyze component types
         ComponentTypeAnalysis typeAnalysis = analyzeComponentTypes(selectedComponents);
-        
-        System.out.println("=== STUDENT CALCULATOR DEBUG ===");
         System.out.println("Component Type Analysis:");
         System.out.println("  Internal components: " + typeAnalysis.internalCount);
         System.out.println("  External components: " + typeAnalysis.externalCount);

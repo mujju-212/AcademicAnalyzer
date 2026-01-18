@@ -259,7 +259,6 @@ public class ResultLauncher extends JPanel {
         System.out.println("Components selected: " + components.size());
     }
     private void launchResults() {
-        System.out.println("=== UI LAUNCH DEBUG ===");
         System.out.println("Launch button clicked");
         
         if (!validateSelections()) {

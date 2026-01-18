@@ -197,3 +197,18 @@ run.bat
 run.ps1
 copy-jars-to-lib.ps1
 maven.zip
+
+# Build scripts (development only)
+build-installer.ps1
+build-portable.ps1
+
+# Credentials and sensitive files
+docs/CREDENTIALS.md
+academic_analyzer_full.sql
+*.sql
+.env
+
+# Build outputs
+dist/
+AcademicAnalyzer-*.exe
+*.msi

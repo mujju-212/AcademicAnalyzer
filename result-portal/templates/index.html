@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Student Result Portal</title>
+    <title>Academic Analyzer Portal</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
@@ -11,14 +11,10 @@
         <div class="header">
             <div class="logo-section">
                 <div class="logo">
-                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <rect x="3" y="13" width="4" height="8" rx="1" fill="#667eea"/>
-                        <rect x="10" y="8" width="4" height="13" rx="1" fill="#764ba2"/>
-                        <rect x="17" y="3" width="4" height="18" rx="1" fill="#667eea"/>
-                    </svg>
+                    <img src="{{ url_for('static', filename='images/AA LOGO.png') }}" alt="Academic Analyzer Logo" style="height: 60px; width: auto;">
                 </div>
                 <div class="logo-text">
-                    <h1>Student Result Portal</h1>
+                    <h1>Academic Analyzer Portal</h1>
                     <p>View Your Academic Results</p>
                 </div>
             </div>

@@ -1816,6 +1816,21 @@ public class SectionAnalyzer extends JPanel {
             com.itextpdf.text.pdf.PdfWriter writer = com.itextpdf.text.pdf.PdfWriter.getInstance(document, new java.io.FileOutputStream(filePath));
             document.open();
             
+            // Add Logo
+            try {
+                String logoPath = "resources/images/AA LOGO.png";
+                java.io.File logoFile = new java.io.File(logoPath);
+                if (logoFile.exists()) {
+                    com.itextpdf.text.Image logo = com.itextpdf.text.Image.getInstance(logoPath);
+                    logo.scaleToFit(120, 72); // 150x90 scaled down proportionally
+                    logo.setAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
+                    document.add(logo);
+                    document.add(new com.itextpdf.text.Paragraph(" ")); // spacing
+                }
+            } catch (Exception ex) {
+                // If logo not found, continue without it
+            }
+            
             // Modern Styled Fonts
             com.itextpdf.text.Font titleFont = new com.itextpdf.text.Font(com.itextpdf.text.Font.FontFamily.HELVETICA, 22, com.itextpdf.text.Font.BOLD, new com.itextpdf.text.BaseColor(79, 70, 229));
             com.itextpdf.text.Font headingFont = new com.itextpdf.text.Font(com.itextpdf.text.Font.FontFamily.HELVETICA, 16, com.itextpdf.text.Font.BOLD, new com.itextpdf.text.BaseColor(17, 24, 39));
@@ -2342,8 +2357,6 @@ public class SectionAnalyzer extends JPanel {
             int totalSubjectWidth = 0;
             for (String examType : subject.examTypes) {
                 Integer examMaxMarks = subject.examTypeMaxMarks.get(examType);
-                System.out.println("@@@ EXAM TYPE DISPLAY: " + examType + 
-                    " | Max Marks: " + examMaxMarks + " @@@");
                 String examHeader = examMaxMarks != null && examMaxMarks > 0 ? 
                                    examType + " (" + examMaxMarks + ")" : examType;
                 int width = Math.max(calculateTextWidth(examHeader, 10) + 20, 85);

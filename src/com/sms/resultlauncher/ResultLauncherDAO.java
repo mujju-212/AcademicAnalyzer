@@ -934,8 +934,6 @@ public class ResultLauncherDAO {
      * Load student marks using subject-wise weighted calculation (same as preview)
      */
     private List<Component> loadStudentComponentMarks(int studentId, int sectionId, AnalyzerDAO dao) {
-        System.out.println("DEBUG: loadStudentComponentMarks called with studentId=" + studentId + ", sectionId=" + sectionId);
-        
         List<Component> studentComponents = new ArrayList<>();
         
         try {

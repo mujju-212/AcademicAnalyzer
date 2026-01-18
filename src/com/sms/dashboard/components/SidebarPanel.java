@@ -27,24 +27,41 @@ public class SidebarPanel extends JPanel {
         // Add logo/title area
         JPanel logoPanel = new JPanel();
         logoPanel.setBackground(backgroundColor);
-        logoPanel.setMaximumSize(new Dimension(280, 100));
-        logoPanel.setLayout(new GridBagLayout());
+        logoPanel.setMaximumSize(new Dimension(280, 170));
+        logoPanel.setPreferredSize(new Dimension(280, 170));
+        logoPanel.setLayout(new BorderLayout());
+        logoPanel.setBorder(BorderFactory.createEmptyBorder(20, 0, 15, 0));
 
         JPanel logoContent = new JPanel();
         logoContent.setOpaque(false);
         logoContent.setLayout(new BoxLayout(logoContent, BoxLayout.Y_AXIS));
 
+        // Load and display logo image
+        try {
+            java.net.URL logoURL = getClass().getClassLoader().getResource("resources/images/AA LOGO.png");
+            if (logoURL != null) {
+                ImageIcon logoIcon = new ImageIcon(logoURL);
+                Image scaledImage = logoIcon.getImage().getScaledInstance(150, 90, Image.SCALE_SMOOTH);
+                JLabel logoLabel = new JLabel(new ImageIcon(scaledImage));
+                logoLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
+                logoContent.add(logoLabel);
+                logoContent.add(Box.createVerticalStrut(10));
+            }
+        } catch (Exception e) {
+            // If logo not found, continue without it
+        }
+
         // Create a single label for "Academic Analyzer" with all bold
         JLabel titleLabel = new JLabel("Academic Analyzer");
-        titleLabel.setFont(new Font("SansSerif", Font.BOLD, 22));
+        titleLabel.setFont(new Font("SansSerif", Font.BOLD, 16));
         titleLabel.setForeground(new Color(17, 24, 39));
         titleLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
 
         logoContent.add(titleLabel);
-        logoPanel.add(logoContent);
+        logoPanel.add(logoContent, BorderLayout.CENTER);
 
         add(logoPanel);
-        add(Box.createVerticalStrut(30));
+        add(Box.createVerticalStrut(20));
         
         // Add sidebar buttons
         JButton dashboardBtn = addSidebarButton("Dashboard", "🏠", actions::showDashboard);

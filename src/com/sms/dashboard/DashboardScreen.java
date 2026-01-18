@@ -90,6 +90,15 @@ public class DashboardScreen extends JFrame implements DashboardActions {
     private static final String RESULT_LAUNCHER_VIEW = "resultLauncher";
 
     public DashboardScreen(int userId) {
+        this(userId, true);
+    }
+    
+    /**
+     * Constructor with option to control visibility
+     * @param userId - user ID
+     * @param showFrame - whether to make frame visible immediately
+     */
+    public DashboardScreen(int userId, boolean showFrame) {
         this.userId = userId;
         
         // Initialize services
@@ -103,47 +112,30 @@ public class DashboardScreen extends JFrame implements DashboardActions {
             DashboardErrorHandler.handleError("Failed to initialize dashboard", e);
         }
         
-        initializeUI();
+        initializeUI(showFrame);
     }
     
     private void initializeUI() {
+        initializeUI(true);
+    }
+    
+    private void initializeUI(boolean showFrame) {
         // Set up CardLayout for switching between views
         cardLayout = new CardLayout();
         mainContentPanel = new JPanel(cardLayout);
         mainContentPanel.setBackground(BACKGROUND_COLOR);
         mainContentPanel.setOpaque(true);
         
-        // Initialize and add dashboard panel
+        // Initialize ONLY the main dashboard panel for fast startup
         JPanel dashboardPanel = createDashboardPanel();
         mainContentPanel.add(dashboardPanel, DASHBOARD_VIEW);
         
-        // Initialize library panel (hierarchical year/semester view)
+        // Initialize library panel 
         JPanel libraryPanel = createLibraryPanel();
         mainContentPanel.add(libraryPanel, LIBRARY_VIEW);
         
-        // Initialize create section panel
-        createSectionPanel = new CreateSectionPanel(this, userId, this::closeSectionCreationPanel);
-        mainContentPanel.add(createSectionPanel, CREATE_SECTION_VIEW);
-        
-        // Initialize student entry panel
-        studentEntryPanel = new StudentEntryDialog(this, dataManager, this::closeStudentEntryPanel);
-        mainContentPanel.add(studentEntryPanel, STUDENT_ENTRY_VIEW);
-        
-        // Initialize mark entry panel
-        markEntryPanel = new MarkEntryDialog(this, this::closeMarkEntryPanel);
-        mainContentPanel.add(markEntryPanel, MARK_ENTRY_VIEW);
-        
-        // Initialize student analyzer panel
-        studentAnalyzerPanel = new StudentAnalyzer(this, dataManager.getSectionStudents(), this::closeStudentAnalyzerPanel);
-        mainContentPanel.add(studentAnalyzerPanel, STUDENT_ANALYZER_VIEW);
-        
-        // Initialize view data panel (Field selection & export)
-        viewDataPanel = new ViewSelectionTool(this, dataManager.getSectionStudents(), this::closeViewDataPanel);
-        mainContentPanel.add(viewDataPanel, VIEW_DATA_VIEW);
-        
-        // Initialize result launcher panel
-        resultLauncherPanel = new com.sms.resultlauncher.ResultLauncher(this, this::closeResultLauncherPanel);
-        mainContentPanel.add(resultLauncherPanel, RESULT_LAUNCHER_VIEW);
+        // DON'T initialize other panels yet - they'll be created on-demand
+        // This reduces startup time from 10+ seconds to ~2 seconds
         
         // Set up main frame
         setTitle("Academic Analyzer - Dashboard");
@@ -160,7 +152,9 @@ public class DashboardScreen extends JFrame implements DashboardActions {
         // Add main content with CardLayout
         add(mainContentPanel, BorderLayout.CENTER);
         
-        setVisible(true);
+        if (showFrame) {
+            setVisible(true);
+        }
         
         // Show dashboard by default
         cardLayout.show(mainContentPanel, DASHBOARD_VIEW);
@@ -196,8 +190,10 @@ public class DashboardScreen extends JFrame implements DashboardActions {
     
     // Method to show create section panel
     public void showCreateSectionPanel() {
-        // Remove old panel and create new one in create mode (null sectionId)
-        mainContentPanel.remove(createSectionPanel);
+        // Remove old panel if it exists and create new one in create mode (null sectionId)
+        if (createSectionPanel != null) {
+            mainContentPanel.remove(createSectionPanel);
+        }
         createSectionPanel = new CreateSectionPanel(this, userId, null, this::closeSectionCreationPanel);
         mainContentPanel.add(createSectionPanel, CREATE_SECTION_VIEW);
         cardLayout.show(mainContentPanel, CREATE_SECTION_VIEW);
@@ -205,8 +201,10 @@ public class DashboardScreen extends JFrame implements DashboardActions {
     
     // Method to show edit section panel
     public void showEditSectionPanel(int sectionId) {
-        // Remove old create section panel and create new one in edit mode
-        mainContentPanel.remove(createSectionPanel);
+        // Remove old create section panel if it exists and create new one in edit mode
+        if (createSectionPanel != null) {
+            mainContentPanel.remove(createSectionPanel);
+        }
         createSectionPanel = new CreateSectionPanel(this, userId, sectionId, this::closeSectionCreationPanel);
         mainContentPanel.add(createSectionPanel, CREATE_SECTION_VIEW);
         cardLayout.show(mainContentPanel, CREATE_SECTION_VIEW);
@@ -214,6 +212,11 @@ public class DashboardScreen extends JFrame implements DashboardActions {
     
     // Method to show student entry panel
     public void showStudentEntryPanel() {
+        // Create panel on-demand if not already initialized
+        if (studentEntryPanel == null) {
+            studentEntryPanel = new StudentEntryDialog(this, dataManager, this::closeStudentEntryPanel);
+            mainContentPanel.add(studentEntryPanel, STUDENT_ENTRY_VIEW);
+        }
         cardLayout.show(mainContentPanel, STUDENT_ENTRY_VIEW);
     }
     
@@ -505,6 +508,11 @@ public class DashboardScreen extends JFrame implements DashboardActions {
     }
     
     public void showMarkEntryPanel() {
+        // Create panel on-demand if not already initialized
+        if (markEntryPanel == null) {
+            markEntryPanel = new MarkEntryDialog(this, this::closeMarkEntryPanel);
+            mainContentPanel.add(markEntryPanel, MARK_ENTRY_VIEW);
+        }
         cardLayout.show(mainContentPanel, MARK_ENTRY_VIEW);
     }
     
@@ -524,6 +532,11 @@ public class DashboardScreen extends JFrame implements DashboardActions {
     }
     
     public void showResultLauncherPanel() {
+        // Create panel on-demand if not already initialized
+        if (resultLauncherPanel == null) {
+            resultLauncherPanel = new com.sms.resultlauncher.ResultLauncher(this, this::closeResultLauncherPanel);
+            mainContentPanel.add(resultLauncherPanel, RESULT_LAUNCHER_VIEW);
+        }
         cardLayout.show(mainContentPanel, RESULT_LAUNCHER_VIEW);
     }
     
@@ -533,6 +546,11 @@ public class DashboardScreen extends JFrame implements DashboardActions {
     }
     
     public void showViewDataPanel() {
+        // Create panel on-demand if not already initialized
+        if (viewDataPanel == null) {
+            viewDataPanel = new ViewSelectionTool(this, dataManager.getSectionStudents(), this::closeViewDataPanel);
+            mainContentPanel.add(viewDataPanel, VIEW_DATA_VIEW);
+        }
         cardLayout.show(mainContentPanel, VIEW_DATA_VIEW);
     }
     
@@ -542,6 +560,11 @@ public class DashboardScreen extends JFrame implements DashboardActions {
     }
     
     public void showStudentAnalyzerPanel() {
+        // Create panel on-demand if not already initialized
+        if (studentAnalyzerPanel == null) {
+            studentAnalyzerPanel = new StudentAnalyzer(this, dataManager.getSectionStudents(), this::closeStudentAnalyzerPanel);
+            mainContentPanel.add(studentAnalyzerPanel, STUDENT_ANALYZER_VIEW);
+        }
         cardLayout.show(mainContentPanel, STUDENT_ANALYZER_VIEW);
     }
     
@@ -990,7 +1013,7 @@ public class DashboardScreen extends JFrame implements DashboardActions {
             JOptionPane.YES_NO_OPTION);
         if (choice == JOptionPane.YES_OPTION) {
             dispose();
-            new LoginScreen().setVisible(true);
+            SwingUtilities.invokeLater(() -> new com.sms.login.AuthenticationFrame());
         }
     }
     

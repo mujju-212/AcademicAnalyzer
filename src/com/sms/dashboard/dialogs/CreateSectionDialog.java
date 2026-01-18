@@ -145,7 +145,6 @@ public class CreateSectionDialog extends JDialog {
     }
     
     private JPanel createSubjectsPanel() {
-        System.out.println("[DEBUG] Creating Subjects Panel");
         JPanel panel = new JPanel(new BorderLayout());
         panel.setBackground(themeManager.getCardColor());
         panel.setBorder(BorderFactory.createEmptyBorder(30, 40, 30, 40));
@@ -166,7 +165,6 @@ public class CreateSectionDialog extends JDialog {
         
         // Table
         String[] columns = {"Subject Name", "Total Marks", "Credit", "Pass Marks", "Actions"};
-        System.out.println("[DEBUG] Creating table with " + columns.length + " columns");
         subjectTableModel = new DefaultTableModel(columns, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
@@ -177,7 +175,6 @@ public class CreateSectionDialog extends JDialog {
         subjectTable.setRowHeight(35);
         
         // Set column widths
-        System.out.println("[DEBUG] Setting column widths");
         subjectTable.getColumnModel().getColumn(0).setPreferredWidth(200); // Subject Name
         subjectTable.getColumnModel().getColumn(1).setPreferredWidth(100); // Total Marks
         subjectTable.getColumnModel().getColumn(2).setPreferredWidth(80);  // Credit
@@ -189,8 +186,6 @@ public class CreateSectionDialog extends JDialog {
         // Add cell renderer and editor for the actions column
         subjectTable.getColumnModel().getColumn(4).setCellRenderer(new SubjectButtonRenderer());
         subjectTable.getColumnModel().getColumn(4).setCellEditor(new SubjectButtonEditor(new JCheckBox()));
-        System.out.println("[DEBUG] Actions column renderer and editor set");
-        
         // Disable auto resize to allow horizontal scrolling
         subjectTable.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
         System.out.println("[DEBUG] Table auto-resize disabled (mode: AUTO_RESIZE_OFF)");
@@ -199,7 +194,6 @@ public class CreateSectionDialog extends JDialog {
         scrollPane.setPreferredSize(new Dimension(0, 300));
         scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
         scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
-        System.out.println("[DEBUG] ScrollPane created with HORIZONTAL_SCROLLBAR_AS_NEEDED");
         System.out.println("[DEBUG] Table column count: " + subjectTable.getColumnCount());
         System.out.println("[DEBUG] Table preferred viewport size: " + subjectTable.getPreferredScrollableViewportSize());
         
@@ -210,26 +204,19 @@ public class CreateSectionDialog extends JDialog {
         addButton.addActionListener(e -> showAddSubjectDialog());
 
         // Context menu on right-click: Edit / Remove
-        System.out.println("[DEBUG] Creating context menu for subjects table");
         JPopupMenu subjectMenu = new JPopupMenu();
         JMenuItem editItem = new JMenuItem("Edit Subject");
         JMenuItem removeItem = new JMenuItem("Remove Subject");
         subjectMenu.add(editItem);
         subjectMenu.add(removeItem);
-        System.out.println("[DEBUG] Context menu items added: Edit Subject, Remove Subject");
-
         // Attach menu to table
         subjectTable.setComponentPopupMenu(subjectMenu);
-        System.out.println("[DEBUG] Context menu attached to subject table");
-
         // Ensure right-click selects the row under cursor
         subjectTable.addMouseListener(new MouseAdapter() {
             private void selectRow(MouseEvent e) {
                 int row = subjectTable.rowAtPoint(e.getPoint());
-                System.out.println("[DEBUG] Row selection - row at point: " + row);
                 if (row != -1) {
                     subjectTable.setRowSelectionInterval(row, row);
-                    System.out.println("[DEBUG] Row " + row + " selected");
                 }
             }
 
@@ -245,36 +232,24 @@ public class CreateSectionDialog extends JDialog {
                 if (e.isPopupTrigger()) selectRow(e);
             }
         });
-        System.out.println("[DEBUG] Mouse listener added to subject table");
-
         // Hook menu actions
         editItem.addActionListener(e -> {
-            System.out.println("[DEBUG] Edit Subject menu item clicked");
             int row = subjectTable.getSelectedRow();
-            System.out.println("[DEBUG] Selected row: " + row);
             if (row != -1) {
-                System.out.println("[DEBUG] Calling showEditSubjectDialog for row " + row);
                 showEditSubjectDialog(row);
             } else {
-                System.out.println("[DEBUG] No row selected, showing error");
                 showError("Please select a subject to edit");
             }
         });
 
         removeItem.addActionListener(e -> {
-            System.out.println("[DEBUG] Remove Subject menu item clicked");
             int row = subjectTable.getSelectedRow();
-            System.out.println("[DEBUG] Selected row: " + row);
             if (row != -1) {
-                System.out.println("[DEBUG] Calling removeSubjectAtRow for row " + row);
                 removeSubjectAtRow(row);
             } else {
-                System.out.println("[DEBUG] No row selected, showing error");
                 showError("Please select a subject to remove");
             }
         });
-        
-        System.out.println("[DEBUG] Subjects panel created successfully");
         return panel;
     }
     
@@ -3061,13 +3036,10 @@ public class CreateSectionDialog extends JDialog {
     }
     
     private void showEditSubjectDialog(int row) {
-        System.out.println("[DEBUG] showEditSubjectDialog called for row: " + row);
         String oldSubjectName = (String) subjectTableModel.getValueAt(row, 0);
         String oldMarks = (String) subjectTableModel.getValueAt(row, 1);
         String oldCredit = (String) subjectTableModel.getValueAt(row, 2);
         String oldPassMarks = (String) subjectTableModel.getValueAt(row, 3);
-        System.out.println("[DEBUG] Editing subject: " + oldSubjectName);
-        
         JDialog dialog = new JDialog(this, "Edit Subject", true);
         dialog.setSize(450, 450);
         dialog.setLocationRelativeTo(this);
@@ -3414,16 +3386,13 @@ public class CreateSectionDialog extends JDialog {
 
     // Centralized removal logic for subjects
     private void removeSubjectAtRow(int row) {
-        System.out.println("[DEBUG] removeSubjectAtRow called for row: " + row);
         System.out.println("[DEBUG] Table row count: " + subjectTableModel.getRowCount());
         if (row < 0 || row >= subjectTableModel.getRowCount()) {
-            System.out.println("[DEBUG] Invalid row, showing error");
             showError("Invalid subject selection");
             return;
         }
 
         String subjectName = (String) subjectTableModel.getValueAt(row, 0);
-        System.out.println("[DEBUG] Removing subject: " + subjectName);
         int confirm = JOptionPane.showConfirmDialog(
             this,
             "Are you sure you want to remove '" + subjectName + "'?\nThis will also remove its exam patterns.",

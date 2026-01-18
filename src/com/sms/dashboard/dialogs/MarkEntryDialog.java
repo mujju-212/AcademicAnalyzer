@@ -660,7 +660,6 @@ public class MarkEntryDialog extends JPanel {
     // OLD DEBUG METHOD - Commented out after grid redesign
     /*
     private void debugDropdownState() {
-        System.out.println("\n=== Dropdown State Debug ===");
         System.out.println("Section dropdown enabled: " + sectionDropdown.isEnabled());
         System.out.println("Section dropdown items: " + sectionDropdown.getItemCount());
         System.out.println("Subject dropdown enabled: " + subjectDropdown.isEnabled());
@@ -674,7 +673,6 @@ public class MarkEntryDialog extends JPanel {
                 System.out.println("  " + i + ": " + examTypeDropdown.getItemAt(i));
             }
         }
-        System.out.println("=== End Debug ===\n");
     }
     */
 
@@ -2376,6 +2374,21 @@ private void debugDropdownStates() {
                 try {
                     PdfWriter.getInstance(document, new FileOutputStream(file));
                     document.open();
+                    
+                    // Add Logo
+                    try {
+                        String logoPath = "resources/images/AA LOGO.png";
+                        java.io.File logoFile = new java.io.File(logoPath);
+                        if (logoFile.exists()) {
+                            com.itextpdf.text.Image logo = com.itextpdf.text.Image.getInstance(logoPath);
+                            logo.scaleToFit(120, 72); // 150x90 scaled down proportionally
+                            logo.setAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
+                            document.add(logo);
+                            document.add(new Paragraph(" ")); // spacing
+                        }
+                    } catch (Exception ex) {
+                        // If logo not found, continue without it
+                    }
                     
                     // Add title
                     com.itextpdf.text.Font titleFont = new com.itextpdf.text.Font(

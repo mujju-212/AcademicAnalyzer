@@ -137,7 +137,6 @@ public class CreateSectionPanel extends JPanel {
         descriptionArea.setWrapStyleWord(true);
         
         // Initialize subject components
-        System.out.println("[DEBUG] Initializing CreateSectionPanel - subject table with 5 columns");
         subjectTableModel = new DefaultTableModel(new String[]{"Subject Name", "Total Marks", "Credit", "Pass Marks", "Actions"}, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
@@ -310,7 +309,6 @@ public class CreateSectionPanel extends JPanel {
     }
     
     private JPanel createSubjectTablePanel() {
-        System.out.println("[DEBUG] Creating subject table panel");
         JPanel panel = UIComponentFactory.createStyledPanel(themeManager.getCardColor(), BORDER_RADIUS);
         panel.setLayout(new BorderLayout());
         panel.setBorder(BorderFactory.createTitledBorder("Added Subjects"));
@@ -330,41 +328,30 @@ public class CreateSectionPanel extends JPanel {
             // Add cell renderer and editor for the actions column
             subjectTable.getColumnModel().getColumn(4).setCellRenderer(new SubjectButtonRenderer());
             subjectTable.getColumnModel().getColumn(4).setCellEditor(new SubjectButtonEditor());
-            System.out.println("[DEBUG] Actions column renderer and editor set");
         }
         
         // Disable auto resize to allow horizontal scrolling
         subjectTable.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
-        System.out.println("[DEBUG] Table auto-resize disabled for horizontal scrolling");
-        
         JScrollPane scrollPane = new JScrollPane(subjectTable);
         scrollPane.setPreferredSize(new Dimension(0, 200));
         scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
         scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
-        System.out.println("[DEBUG] ScrollPane created with horizontal scrollbar enabled");
         panel.add(scrollPane, BorderLayout.CENTER);
         
         // Context menu on right-click: Edit / Remove
-        System.out.println("[DEBUG] Creating context menu for subjects table");
         JPopupMenu subjectMenu = new JPopupMenu();
         JMenuItem editItem = new JMenuItem("Edit Subject");
         JMenuItem removeItem = new JMenuItem("Remove Subject");
         subjectMenu.add(editItem);
         subjectMenu.add(removeItem);
-        System.out.println("[DEBUG] Context menu items added");
-        
         // Attach menu to table
         subjectTable.setComponentPopupMenu(subjectMenu);
-        System.out.println("[DEBUG] Context menu attached to subject table");
-        
         // Ensure right-click selects the row under cursor
         subjectTable.addMouseListener(new java.awt.event.MouseAdapter() {
             private void selectRow(java.awt.event.MouseEvent e) {
                 int row = subjectTable.rowAtPoint(e.getPoint());
-                System.out.println("[DEBUG] Row at point: " + row);
                 if (row != -1) {
                     subjectTable.setRowSelectionInterval(row, row);
-                    System.out.println("[DEBUG] Row " + row + " selected");
                 }
             }
             
@@ -380,13 +367,9 @@ public class CreateSectionPanel extends JPanel {
                 if (e.isPopupTrigger()) selectRow(e);
             }
         });
-        System.out.println("[DEBUG] Mouse listener added");
-        
         // Hook menu actions
         editItem.addActionListener(e -> {
-            System.out.println("[DEBUG] Edit Subject clicked");
             int row = subjectTable.getSelectedRow();
-            System.out.println("[DEBUG] Selected row: " + row);
             if (row != -1) {
                 showEditSubjectDialog(row);
             } else {
@@ -395,17 +378,13 @@ public class CreateSectionPanel extends JPanel {
         });
         
         removeItem.addActionListener(e -> {
-            System.out.println("[DEBUG] Remove Subject clicked");
             int row = subjectTable.getSelectedRow();
-            System.out.println("[DEBUG] Selected row: " + row);
             if (row != -1) {
                 removeSubjectAtRow(row);
             } else {
                 showError("Please select a subject to remove");
             }
         });
-        
-        System.out.println("[DEBUG] Subject table panel created successfully");
         return panel;
     }
     
@@ -476,9 +455,6 @@ public class CreateSectionPanel extends JPanel {
         JPanel panel = UIComponentFactory.createStyledPanel(themeManager.getCardColor(), BORDER_RADIUS);
         panel.setLayout(new BorderLayout());
         panel.setBorder(BorderFactory.createTitledBorder("Exam Pattern Configuration"));
-        
-        System.out.println("[DEBUG] Setting up exam pattern table with Actions column");
-        
         // Set up table with custom renderer and editor for Actions column
         currentPatternTable.setRowHeight(35);
         
@@ -493,7 +469,6 @@ public class CreateSectionPanel extends JPanel {
             // Add cell renderer and editor for the actions column
             currentPatternTable.getColumnModel().getColumn(4).setCellRenderer(new ComponentButtonRenderer());
             currentPatternTable.getColumnModel().getColumn(4).setCellEditor(new ComponentButtonEditor());
-            System.out.println("[DEBUG] Exam pattern Actions column renderer and editor set");
         }
         
         // Disable auto-resize for horizontal scrolling
@@ -514,7 +489,6 @@ public class CreateSectionPanel extends JPanel {
         editMenuItem.addActionListener(e -> {
             int row = currentPatternTable.getSelectedRow();
             if (row >= 0) {
-                System.out.println("[DEBUG] Context menu: Edit component at row " + row);
                 showEditComponentDialog(row);
             }
         });
@@ -522,7 +496,6 @@ public class CreateSectionPanel extends JPanel {
         deleteMenuItem.addActionListener(e -> {
             int row = currentPatternTable.getSelectedRow();
             if (row >= 0) {
-                System.out.println("[DEBUG] Context menu: Remove component at row " + row);
                 removeComponentAtRow(row);
             }
         });
@@ -543,9 +516,6 @@ public class CreateSectionPanel extends JPanel {
                 }
             }
         });
-        
-        System.out.println("[DEBUG] Exam pattern context menu and mouse listener added");
-        
         // Validation and add component
         JPanel bottomPanel = new JPanel(new BorderLayout());
         bottomPanel.setOpaque(false);
@@ -689,13 +659,10 @@ public class CreateSectionPanel extends JPanel {
     }
     
     private void loadSectionDataForEdit() {
-        System.out.println("[DEBUG] loadSectionDataForEdit called - editSectionId: " + editSectionId);
         if (editSectionId == null) {
             System.out.println("[DEBUG] editSectionId is null - skipping load (CREATE mode)");
             return;
         }
-        
-        System.out.println("[DEBUG] Starting to load section data for EDIT mode");
         try (Connection conn = DatabaseConnection.getConnection()) {
             // Load basic section info
             String sql = "SELECT section_name, total_students, academic_year, semester FROM sections WHERE id = ?";
@@ -720,7 +687,6 @@ public class CreateSectionPanel extends JPanel {
             }
             
             // Load subjects
-            System.out.println("[DEBUG] Loading subjects for section ID: " + editSectionId);
             sql = "SELECT s.id, s.subject_name, ss.max_marks, ss.credit, ss.passing_marks " +
                   "FROM subjects s " +
                   "JOIN section_subjects ss ON s.id = ss.subject_id " +
@@ -754,7 +720,6 @@ public class CreateSectionPanel extends JPanel {
                         e.printStackTrace();
                     }
                 }
-                System.out.println("[DEBUG] Finished loading " + subjectCount + " subjects");
                 System.out.println("[DEBUG] subjectExamPatterns map now has " + subjectExamPatterns.size() + " entries");
             }
             
@@ -787,9 +752,6 @@ public class CreateSectionPanel extends JPanel {
                      "INNER JOIN subject_exam_types sext ON et.id = sext.exam_type_id " +
                      "WHERE sext.section_id = ? AND sext.subject_id = ? " +
                      "ORDER BY et.id";
-        
-        System.out.println("[DEBUG] Executing query with section_id=" + editSectionId + ", subject_id=" + subjectId);
-        
         try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setInt(1, editSectionId);
             pstmt.setInt(2, subjectId);
@@ -805,7 +767,6 @@ public class CreateSectionPanel extends JPanel {
                 ResultSet columns = dbMetaData.getColumns(null, null, "exam_types", "max_marks");
                 hasMaxMarksColumn = columns.next();
                 columns.close();
-                System.out.println("[DEBUG] max_marks column exists in database: " + hasMaxMarksColumn);
             } catch (SQLException e) {
                 System.out.println("[DEBUG] Could not check for max_marks column: " + e.getMessage());
             }
@@ -818,10 +779,7 @@ public class CreateSectionPanel extends JPanel {
                 
                 // Get max_marks from database if column exists
                 int maxMarks = weightage;  // Default: backward compatibility (Option A)
-                System.out.println("[DEBUG] Initial maxMarks set to weightage: " + maxMarks);
-                
                 if (hasMaxMarksColumn) {
-                    System.out.println("[DEBUG] ✅ max_marks column EXISTS - attempting to load for: " + componentName);
                     try {
                         // Re-query with max_marks for this specific exam
                         String maxMarksQuery = "SELECT et.max_marks FROM exam_types et " +
@@ -834,15 +792,11 @@ public class CreateSectionPanel extends JPanel {
                             try (ResultSet rs2 = ps2.executeQuery()) {
                                 if (rs2.next()) {
                                     int dbMaxMarks = rs2.getInt("max_marks");
-                                    System.out.println("[DEBUG] Database returned max_marks: " + dbMaxMarks);
                                     if (dbMaxMarks > 0) {
                                         maxMarks = dbMaxMarks;
-                                        System.out.println("[DEBUG] ✅ Using database max_marks: " + maxMarks);
                                     } else {
-                                        System.out.println("[DEBUG] ⚠️ Database max_marks is 0, using weightage: " + weightage);
                                     }
                                 } else {
-                                    System.out.println("[DEBUG] ❌ No result from max_marks query");
                                 }
                             }
                         }
@@ -850,7 +804,6 @@ public class CreateSectionPanel extends JPanel {
                         System.out.println("[DEBUG] ❌ Error fetching max_marks for " + componentName + ": " + e.getMessage());
                     }
                 } else {
-                    System.out.println("[DEBUG] ❌ max_marks column DOES NOT EXIST - using weightage");
                 }
                 
                 // Create component with max_marks and weightage
@@ -859,9 +812,6 @@ public class CreateSectionPanel extends JPanel {
                 System.out.println("[DEBUG] Loaded component #" + componentCount + ": " + componentName + 
                                  " (Max: " + maxMarks + ", Weightage: " + weightage + "%, Passing: " + passingMarks + ")");
             }
-            
-            System.out.println("[DEBUG] Total components found for " + subjectName + ": " + componentCount);
-            
             if (!components.isEmpty()) {
                 subjectExamPatterns.put(subjectName, components);
                 System.out.println("[DEBUG] ✓ Stored " + components.size() + " components for subject: " + subjectName);
@@ -874,14 +824,11 @@ public class CreateSectionPanel extends JPanel {
     private void setupEventHandlers() {
         // Subject selection change handler
         examPatternsSubjectCombo.addActionListener(e -> {
-            System.out.println("[DEBUG] Exam patterns combo box selection changed");
             String selectedSubject = getCurrentSelectedSubject();
-            System.out.println("[DEBUG] Selected subject: " + selectedSubject);
             if (selectedSubject != null) {
                 displayPatternForSubject(selectedSubject);
                 validatePattern(selectedSubject);
             } else {
-                System.out.println("[DEBUG] Selected subject is null");
             }
         });
         
@@ -1090,7 +1037,6 @@ public class CreateSectionPanel extends JPanel {
         
         System.out.println("[DEBUG] Applying template '" + templateName + "' with " + components.size() + " components");
         subjectExamPatterns.put(selectedSubject, components);
-        System.out.println("[DEBUG] Stored components in map for subject: " + selectedSubject);
         System.out.println("[DEBUG] Map now contains " + subjectExamPatterns.size() + " subjects with patterns");
         displayPattern(components);
         validatePattern(selectedSubject);
@@ -1124,7 +1070,6 @@ public class CreateSectionPanel extends JPanel {
     }
     
     private void displayPatternForSubject(String subjectName) {
-        System.out.println("[DEBUG] displayPatternForSubject called for: " + subjectName);
         System.out.println("[DEBUG] Map contains keys: " + subjectExamPatterns.keySet());
         List<ExamComponent> components = subjectExamPatterns.get(subjectName);
         System.out.println("[DEBUG] Retrieved " + (components == null ? "null" : components.size()) + " components");
@@ -1132,15 +1077,11 @@ public class CreateSectionPanel extends JPanel {
     }
     
     private void displayPattern(List<ExamComponent> components) {
-        System.out.println("[DEBUG] displayPattern called");
         if (currentPatternTableModel == null) {
-            System.out.println("[DEBUG] ERROR: currentPatternTableModel is null!");
             return;
         }
         
         currentPatternTableModel.setRowCount(0);
-        System.out.println("[DEBUG] Cleared table");
-        
         if (components == null || components.isEmpty()) {
             System.out.println("[DEBUG] No components to display (null or empty)");
             return;
@@ -1156,7 +1097,6 @@ public class CreateSectionPanel extends JPanel {
                 "Edit/Remove"
             };
             currentPatternTableModel.addRow(row);
-            System.out.println("[DEBUG] Added row: " + component.componentName);
         }
         System.out.println("[DEBUG] Table now has " + currentPatternTableModel.getRowCount() + " rows");
         
@@ -1599,7 +1539,6 @@ public class CreateSectionPanel extends JPanel {
     
     // Method to show edit subject dialog with pre-filled values
     private void showEditSubjectDialog(int row) {
-        System.out.println("[DEBUG] Opening edit dialog for row: " + row);
         String subjectName = (String) subjectTableModel.getValueAt(row, 0);
         String totalMarksStr = subjectTableModel.getValueAt(row, 1).toString();
         String creditStr = subjectTableModel.getValueAt(row, 2).toString();
@@ -1677,8 +1616,6 @@ public class CreateSectionPanel extends JPanel {
                 subjectTableModel.setValueAt(newTotalMarks, row, 1);
                 subjectTableModel.setValueAt(newCredit, row, 2);
                 subjectTableModel.setValueAt(newPassMarks, row, 3);
-                
-                System.out.println("[DEBUG] Updated subject: " + newName);
                 editDialog.dispose();
                 JOptionPane.showMessageDialog(this, "Subject updated successfully!");
             } catch (Exception ex) {
@@ -1700,7 +1637,6 @@ public class CreateSectionPanel extends JPanel {
     
     // Method to remove subject from table
     private void removeSubjectAtRow(int row) {
-        System.out.println("[DEBUG] Removing subject at row: " + row);
         int confirm = JOptionPane.showConfirmDialog(this,
                 "Are you sure you want to remove this subject?",
                 "Confirm Removal",
@@ -1714,8 +1650,6 @@ public class CreateSectionPanel extends JPanel {
             
             // Remove from subject combo
             examPatternsSubjectCombo.removeItem(subjectName);
-            
-            System.out.println("[DEBUG] Subject removed successfully");
             JOptionPane.showMessageDialog(this, "Subject removed successfully!");
         }
     }
@@ -1727,8 +1661,6 @@ public class CreateSectionPanel extends JPanel {
             showError("Please select a subject first");
             return;
         }
-        
-        System.out.println("[DEBUG] Opening edit dialog for component at row: " + row);
         String componentName = (String) currentPatternTableModel.getValueAt(row, 0);
         String maxMarksStr = currentPatternTableModel.getValueAt(row, 1).toString();
         String weightageStr = currentPatternTableModel.getValueAt(row, 2).toString();
@@ -1851,8 +1783,6 @@ public class CreateSectionPanel extends JPanel {
                 }
                 
                 validatePattern(subjectName);
-                
-                System.out.println("[DEBUG] Updated component: " + newName);
                 editDialog.dispose();
                 JOptionPane.showMessageDialog(this, "Component updated successfully!");
             } catch (NumberFormatException ex) {
@@ -1879,8 +1809,6 @@ public class CreateSectionPanel extends JPanel {
             showError("Please select a subject first");
             return;
         }
-        
-        System.out.println("[DEBUG] Removing component at row: " + row);
         int confirm = JOptionPane.showConfirmDialog(this,
                 "Are you sure you want to remove this component?",
                 "Confirm Removal",
@@ -1891,13 +1819,9 @@ public class CreateSectionPanel extends JPanel {
             List<ExamComponent> components = subjectExamPatterns.get(subjectName);
             if (components != null && row < components.size()) {
                 ExamComponent removed = components.remove(row);
-                System.out.println("[DEBUG] Removed component: " + removed.componentName);
-                
                 // Update display
                 displayPattern(components);
                 validatePattern(subjectName);
-                
-                System.out.println("[DEBUG] Component removed successfully");
             }
         }
     }
@@ -1944,9 +1868,6 @@ public class CreateSectionPanel extends JPanel {
                 ResultSet rsColumns = dbMetaData.getColumns(null, null, "exam_types", "max_marks");
                 boolean hasMaxMarksColumn = rsColumns.next();
                 rsColumns.close();
-                
-                System.out.println("[DEBUG] max_marks column exists for UPDATE: " + hasMaxMarksColumn);
-                
                 // Update the exam_type record - with or without max_marks column
                 String updateQuery;
                 if (hasMaxMarksColumn) {
@@ -2057,13 +1978,11 @@ public class CreateSectionPanel extends JPanel {
             removeButton.setBorderPainted(false);
             
             editButton.addActionListener(e -> {
-                System.out.println("[DEBUG] Edit button clicked for component row: " + currentRow);
                 fireEditingStopped();
                 showEditComponentDialog(currentRow);
             });
             
             removeButton.addActionListener(e -> {
-                System.out.println("[DEBUG] Remove button clicked for component row: " + currentRow);
                 fireEditingStopped();
                 removeComponentAtRow(currentRow);
             });
@@ -2151,13 +2070,11 @@ public class CreateSectionPanel extends JPanel {
             removeButton.setBorderPainted(false);
             
             editButton.addActionListener(e -> {
-                System.out.println("[DEBUG] Edit button clicked for row: " + currentRow);
                 fireEditingStopped();
                 showEditSubjectDialog(currentRow);
             });
             
             removeButton.addActionListener(e -> {
-                System.out.println("[DEBUG] Remove button clicked for row: " + currentRow);
                 fireEditingStopped();
                 removeSubjectAtRow(currentRow);
             });

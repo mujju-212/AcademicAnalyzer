@@ -35,7 +35,6 @@ public class StudentDAO {
     public boolean addStudent(String rollNumber, String name, int sectionId, 
             String email, String phone, int createdBy) {
         try (Connection conn = DatabaseConnection.getConnection()) {
-            System.out.println("=== DEBUG START ===");
             System.out.println("Roll: " + rollNumber);
             System.out.println("Name: " + name);
             System.out.println("SectionId: " + sectionId);
@@ -80,7 +79,6 @@ public class StudentDAO {
                 int result = insertPS.executeUpdate();
                 System.out.println("Insert result: " + result);
                 System.out.println("Insert success: " + (result > 0));
-                System.out.println("=== DEBUG END ===");
                 return result > 0;
             }
             

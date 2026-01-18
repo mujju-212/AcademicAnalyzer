@@ -12,7 +12,7 @@ from reportlab.lib.pagesizes import letter, A4
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak, Image
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 import os
 from dotenv import load_dotenv
@@ -23,13 +23,27 @@ load_dotenv('../.env')
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-here-change-in-production'
 
-# Database configuration from .env
+# Database configuration from environment variables (required - no defaults)
+DB_HOST = os.getenv('DB_HOST')
+DB_PORT = os.getenv('DB_PORT', '3306')
+DB_NAME = os.getenv('DB_NAME', 'academic_analyzer')
+DB_USERNAME = os.getenv('DB_USERNAME')
+DB_PASSWORD = os.getenv('DB_PASSWORD')
+
+# Validate required configuration
+if not DB_HOST:
+    raise ValueError("DB_HOST environment variable is required")
+if not DB_USERNAME:
+    raise ValueError("DB_USERNAME environment variable is required")
+if not DB_PASSWORD:
+    raise ValueError("DB_PASSWORD environment variable is required")
+
 DB_CONFIG = {
-    'host': os.getenv('DB_HOST', 'localhost'),
-    'port': int(os.getenv('DB_PORT', 3306)),
-    'database': os.getenv('DB_NAME', 'academic_analyzer'),
-    'user': os.getenv('DB_USERNAME', 'root'),
-    'password': os.getenv('DB_PASSWORD', '')
+    'host': DB_HOST,
+    'port': int(DB_PORT),
+    'database': DB_NAME,
+    'user': DB_USERNAME,
+    'password': DB_PASSWORD
 }
 
 def get_db_connection():
@@ -405,6 +419,14 @@ def generate_result_pdf(buffer, result, result_data):
     
     elements = []
     styles = getSampleStyleSheet()
+    
+    # Logo
+    logo_path = os.path.join(os.path.dirname(__file__), 'static', 'images', 'AA LOGO.png')
+    if os.path.exists(logo_path):
+        logo = Image(logo_path, width=1.5*inch, height=0.9*inch)
+        logo.hAlign = 'CENTER'
+        elements.append(logo)
+        elements.append(Spacer(1, 12))
     
     # Title
     title_style = ParagraphStyle(

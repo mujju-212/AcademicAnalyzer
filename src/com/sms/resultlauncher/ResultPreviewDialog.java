@@ -102,8 +102,6 @@ public class ResultPreviewDialog extends JDialog {
         
         // Table (uses columnWidths)
         createPreviewTable();
-        System.out.println("DEBUG: hierarchicalHeaderPanel = " + hierarchicalHeaderPanel);
-        
         // Hide default table header - we'll use custom hierarchical header
         previewTable.setTableHeader(null);
         
@@ -112,16 +110,13 @@ public class ResultPreviewDialog extends JDialog {
         tableWithHeaderPanel.setBackground(Color.WHITE);
         
         if (hierarchicalHeaderPanel != null) {
-            System.out.println("DEBUG: Adding hierarchical header to BorderLayout.NORTH");
             System.out.println("DEBUG: Header panel height = " + hierarchicalHeaderPanel.getPreferredSize().height);
             // Force header panel to match table width
             int totalTableWidth = columnWidths.stream().mapToInt(Integer::intValue).sum();
             hierarchicalHeaderPanel.setPreferredSize(new Dimension(totalTableWidth, hierarchicalHeaderPanel.getPreferredSize().height));
             hierarchicalHeaderPanel.setMaximumSize(new Dimension(totalTableWidth, hierarchicalHeaderPanel.getPreferredSize().height));
-            System.out.println("DEBUG: Total table width = " + totalTableWidth);
             tableWithHeaderPanel.add(hierarchicalHeaderPanel, BorderLayout.NORTH);
         } else {
-            System.out.println("DEBUG: No hierarchical header panel");
         }
         
         tableWithHeaderPanel.add(previewTable, BorderLayout.CENTER);
@@ -132,9 +127,6 @@ public class ResultPreviewDialog extends JDialog {
         scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
         scrollPane.setBorder(BorderFactory.createEmptyBorder());
         scrollPane.getViewport().setBackground(ResultLauncherUtils.CARD_COLOR);
-        
-        System.out.println("DEBUG: Table with hierarchical header wrapped in scroll pane");
-        
         JPanel tablePanel = ResultLauncherUtils.createModernCard();
         tablePanel.setLayout(new BorderLayout());
         tablePanel.add(scrollPane, BorderLayout.CENTER);
@@ -202,7 +194,6 @@ public class ResultPreviewDialog extends JDialog {
     
     private void createPreviewTable() {
         // Use pre-loaded storedRankingData from constructor
-        System.out.println("DEBUG: storedRankingData = " + storedRankingData);
         if (storedRankingData != null) {
             System.out.println("DEBUG: subjects count = " + storedRankingData.subjects.size());
         }
@@ -368,8 +359,6 @@ public class ResultPreviewDialog extends JDialog {
     private void calculatePreviewResults() {
         try {
             tableModel.setRowCount(0);
-            
-            System.out.println("=== PREVIEW CALCULATION DEBUG ===");
             System.out.println("Section ID: " + sectionId);
             System.out.println("Selected Students: " + studentIds.size());
             System.out.println("Selected Components: " + components.size());
@@ -677,7 +666,6 @@ public class ResultPreviewDialog extends JDialog {
     }
     
     private List<Component> loadStudentComponentMarks(int studentId) {
-        System.out.println("DEBUG: loadStudentComponentMarks called with studentId=" + studentId + ", sectionId=" + sectionId);
         try {
             AnalyzerDAO dao = new AnalyzerDAO();
             
@@ -904,8 +892,6 @@ public class ResultPreviewDialog extends JDialog {
         // Add both rows to container
         container.add(subjectRow);
         container.add(examTypeRow);
-        
-        System.out.println("DEBUG: Created hierarchical header with 2 rows using BoxLayout");
         System.out.println("DEBUG: subjects count = " + storedRankingData.subjects.size());
         
         return container;

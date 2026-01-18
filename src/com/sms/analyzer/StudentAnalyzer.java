@@ -420,6 +420,21 @@ public class StudentAnalyzer extends JPanel {
                 com.itextpdf.text.pdf.PdfWriter writer = com.itextpdf.text.pdf.PdfWriter.getInstance(document, new java.io.FileOutputStream(filePath));
                 document.open();
                 
+                // Add Logo
+                try {
+                    String logoPath = "resources/images/AA LOGO.png";
+                    java.io.File logoFile = new java.io.File(logoPath);
+                    if (logoFile.exists()) {
+                        com.itextpdf.text.Image logo = com.itextpdf.text.Image.getInstance(logoPath);
+                        logo.scaleToFit(120, 72); // 150x90 scaled down proportionally
+                        logo.setAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
+                        document.add(logo);
+                        document.add(new com.itextpdf.text.Paragraph(" ")); // spacing
+                    }
+                } catch (Exception ex) {
+                    // If logo not found, continue without it
+                }
+                
                 // Define colors
                 com.itextpdf.text.BaseColor primaryColor = new com.itextpdf.text.BaseColor(59, 130, 246);
                 com.itextpdf.text.BaseColor secondaryColor = new com.itextpdf.text.BaseColor(148, 163, 184);
