@@ -3,6 +3,12 @@
 bin/
 target/
 out/
+com/
+
+# Build artifacts
+dist/
+*.exe
+*.msi
 
 # Log files
 *.log

@@ -72,6 +72,11 @@ def index():
     """Landing page - Section selection"""
     return render_template('index.html')
 
+@app.route('/results')
+def results_redirect():
+    """Redirect to index for section selection (from email links)"""
+    return render_template('index.html')
+
 @app.route('/api/sections', methods=['GET'])
 def get_sections():
     """Get all sections that have launched results"""

@@ -2377,17 +2377,35 @@ private void debugDropdownStates() {
                     
                     // Add Logo
                     try {
-                        String logoPath = "resources/images/AA LOGO.png";
-                        java.io.File logoFile = new java.io.File(logoPath);
-                        if (logoFile.exists()) {
-                            com.itextpdf.text.Image logo = com.itextpdf.text.Image.getInstance(logoPath);
-                            logo.scaleToFit(120, 72); // 150x90 scaled down proportionally
+                        java.io.InputStream logoStream = null;
+                        // Try multiple paths
+                        logoStream = getClass().getClassLoader().getResourceAsStream("resources/images/AA LOGO.png");
+                        if (logoStream == null) {
+                            // Try from working directory
+                            java.io.File logoFile = new java.io.File("resources/images/AA LOGO.png");
+                            if (logoFile.exists()) {
+                                logoStream = new java.io.FileInputStream(logoFile);
+                            }
+                        }
+                        if (logoStream == null) {
+                            // Try from installed app directory
+                            java.io.File appLogoFile = new java.io.File(System.getProperty("user.dir") + "/resources/images/AA LOGO.png");
+                            if (appLogoFile.exists()) {
+                                logoStream = new java.io.FileInputStream(appLogoFile);
+                            }
+                        }
+                        if (logoStream != null) {
+                            byte[] logoBytes = logoStream.readAllBytes();
+                            logoStream.close();
+                            com.itextpdf.text.Image logo = com.itextpdf.text.Image.getInstance(logoBytes);
+                            logo.scaleToFit(120, 72);
                             logo.setAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
                             document.add(logo);
-                            document.add(new Paragraph(" ")); // spacing
+                            document.add(new Paragraph(" "));
                         }
                     } catch (Exception ex) {
                         // If logo not found, continue without it
+                        System.err.println("Warning: Could not load logo: " + ex.getMessage());
                     }
                     
                     // Add title

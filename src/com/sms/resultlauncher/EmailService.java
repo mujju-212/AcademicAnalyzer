@@ -249,7 +249,7 @@ public class EmailService {
      * Build HTML email content with professional template.
      */
     private static String buildHtmlEmail(String studentName, String launchName, String customMessage) {
-        String portalUrl = ConfigLoader.getResultPortalUrl();
+        String portalUrl = ConfigLoader.getResultPortalUrl() + "/results";
         StringBuilder html = new StringBuilder();
         
         html.append("<!DOCTYPE html>");
@@ -347,7 +347,7 @@ public class EmailService {
      * Build plain text email content.
      */
     private static String buildPlainEmail(String studentName, String launchName, String customMessage) {
-        String portalUrl = ConfigLoader.getResultPortalUrl();
+        String portalUrl = ConfigLoader.getResultPortalUrl() + "/results";
         StringBuilder plain = new StringBuilder();
         
         plain.append("=============================================\n");
