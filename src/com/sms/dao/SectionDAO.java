@@ -188,7 +188,7 @@ public class SectionDAO {
                 if (ps != null) ps.close();
                 if (conn != null) {
                     conn.setAutoCommit(true);
-                    // Don't close singleton connection
+                    conn.close(); // CRITICAL: Return connection to pool!
                 }
             } catch (SQLException e) {
                 e.printStackTrace();
@@ -274,7 +274,7 @@ public class SectionDAO {
                 if (ps != null) ps.close();
                 if (conn != null) {
                     conn.setAutoCommit(true);
-                    // Don't close singleton connection
+                    conn.close(); // CRITICAL: Return connection to pool!
                 }
             } catch (SQLException e) {
                 e.printStackTrace();
@@ -830,7 +830,6 @@ public class SectionDAO {
         
         try {
             conn = DatabaseConnection.getConnection();
-            System.out.println("getSectionsByUser called for userId: " + userId);
             
             String query = "SELECT id, section_name, total_students, COALESCE(academic_year, 0) as academic_year, COALESCE(semester, 0) as semester " +
                           "FROM sections WHERE created_by = ? ORDER BY academic_year DESC, semester, section_name";
@@ -848,7 +847,6 @@ public class SectionDAO {
                 
                 SectionInfo section = new SectionInfo(sectionId, sectionName, totalStudents, academicYear, semester);
                 sections.add(section);
-                System.out.println("Loaded section: " + sectionName + " with " + totalStudents + " students (Year: " + academicYear + ", Sem: " + semester + ")");
             }
             
             // Close the first resultset before loading subjects
@@ -860,8 +858,6 @@ public class SectionDAO {
                 section.subjects = getSubjectsForSection(conn, section.id);
             }
             
-            System.out.println("Returning " + sections.size() + " sections for userId: " + userId);
-            
         } catch (SQLException e) {
             System.err.println("Error in getSectionsByUser: " + e.getMessage());
             e.printStackTrace();
@@ -869,7 +865,7 @@ public class SectionDAO {
             try {
                 if (rs != null) rs.close();
                 if (ps != null) ps.close();
-                // Don't close shared singleton connection
+                if (conn != null) conn.close(); // CRITICAL: Return connection to pool!
             } catch (SQLException e) {
                 e.printStackTrace();
             }

@@ -26,10 +26,16 @@ public class YearSemesterPanel extends JPanel {
     
     private int userId;
     private Runnable refreshCallback;
+    private com.sms.dashboard.DashboardScreen dashboardScreen;
     
     public YearSemesterPanel(int userId, Runnable refreshCallback) {
+        this(userId, refreshCallback, null);
+    }
+    
+    public YearSemesterPanel(int userId, Runnable refreshCallback, com.sms.dashboard.DashboardScreen dashboardScreen) {
         this.userId = userId;
         this.refreshCallback = refreshCallback;
+        this.dashboardScreen = dashboardScreen;
         
         setBackground(BACKGROUND_COLOR);
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
@@ -262,11 +268,10 @@ public class YearSemesterPanel extends JPanel {
     }
     
     private void addClickHandlerToCard(SectionCardPanel card, SectionInfo section) {
-        // Add combined mouse listener for both click and hover
+        // Add combined mouse listener for click and hover effects
         MouseAdapter clickListener = new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
-                System.out.println("@@@ MOUSE CLICKED EVENT: button=" + e.getButton() + ", section=" + section.sectionName + " @@@");
                 // Only trigger on left-click, not right-click (which opens context menu)
                 if (e.getButton() == MouseEvent.BUTTON1) {
                     openSectionRanking(section);
@@ -274,17 +279,13 @@ public class YearSemesterPanel extends JPanel {
             }
             
             @Override
-            public void mousePressed(MouseEvent e) {
-                System.out.println("@@@ MOUSE PRESSED: button=" + e.getButton() + ", section=" + section.sectionName + " @@@");
-                // Handle right-click for context menu - don't interfere
-                if (e.getButton() == MouseEvent.BUTTON3 || e.isPopupTrigger()) {
-                    return; // Let the context menu handler deal with it
-                }
+            public void mouseEntered(MouseEvent e) {
+                card.setHovered(true);
             }
             
             @Override
-            public void mouseReleased(MouseEvent e) {
-                System.out.println("@@@ MOUSE RELEASED: button=" + e.getButton() + ", section=" + section.sectionName + " @@@");
+            public void mouseExited(MouseEvent e) {
+                card.setHovered(false);
             }
         };
         
@@ -292,16 +293,8 @@ public class YearSemesterPanel extends JPanel {
     }
     
     private void openSectionRanking(SectionInfo section) {
-        // Get the DashboardScreen instance
-        Window window = SwingUtilities.getWindowAncestor(this);
-        if (window instanceof com.sms.dashboard.DashboardScreen) {
-            com.sms.dashboard.DashboardScreen dashboard = (com.sms.dashboard.DashboardScreen) window;
-            
-            // Use DashboardScreen's method to show section ranking table
-            // This will display just the table in the main content area while keeping sidebar visible
-            dashboard.showSectionRankingTable(section.id, section.sectionName);
-        } else {
-            System.err.println("@@@ ERROR: Parent window is not DashboardScreen @@@");
+        if (dashboardScreen != null) {
+            dashboardScreen.showSectionRankingTable(section.id, section.sectionName);
         }
     }
     

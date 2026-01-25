@@ -246,27 +246,19 @@ public class ResultLauncher extends JPanel {
         this.selectedSectionId = sectionId;
         studentPanel.loadStudentsForSection(sectionId);
         componentPanel.loadComponentsForSection(sectionId);
-        System.out.println("Section selected: " + sectionId);
     }
     
     public void onStudentsSelected(List<Integer> studentIds) {
         this.selectedStudentIds = new ArrayList<>(studentIds);
-        System.out.println("Students selected: " + studentIds.size());
     }
     
     public void onComponentsSelected(List<Component> components) {
         this.selectedComponents = new ArrayList<>(components);
-        System.out.println("Components selected: " + components.size());
     }
     private void launchResults() {
-        System.out.println("Launch button clicked");
-        
         if (!validateSelections()) {
-            System.out.println("Validation failed");
             return;
         }
-        
-        System.out.println("Validation passed");
         
         // Show launch configuration dialog
         LaunchConfigurationDialog configDialog = new LaunchConfigurationDialog(parentFrame);
@@ -274,7 +266,7 @@ public class ResultLauncher extends JPanel {
         
         if (configDialog.isConfirmed()) {
             ResultConfiguration config = configDialog.getConfiguration();
-            System.out.println("Got configuration: " + config.getLaunchName());
+
             
             // Disable the launch button and show progress
             JButton launchButton = findLaunchButton();
@@ -286,27 +278,19 @@ public class ResultLauncher extends JPanel {
             SwingWorker<Boolean, Void> worker = new SwingWorker<Boolean, Void>() {
                 @Override
                 protected Boolean doInBackground() throws Exception {
-                    System.out.println("=== SWING WORKER STARTED ===");
-                    
                     boolean result;
                     if (isEditMode && editingLaunchId > 0) {
-                        System.out.println("UPDATE MODE - Updating launch ID: " + editingLaunchId);
                         result = dao.updateResult(editingLaunchId, selectedStudentIds, 
                                                  selectedComponents, config);
                     } else {
-                        System.out.println("CREATE MODE - Launching new results");
                         result = dao.launchResults(selectedSectionId, selectedStudentIds, 
                                                    selectedComponents, config);
                     }
-                    
-                    System.out.println("DAO operation returned: " + result);
                     return result;
                 }
                 
                 @Override
                 protected void done() {
-                    System.out.println("=== SWING WORKER DONE ===");
-                    
                     // Re-enable the launch button
                     if (launchButton != null) {
                         launchButton.setEnabled(true);
@@ -315,7 +299,6 @@ public class ResultLauncher extends JPanel {
                     
                     try {
                         Boolean success = get();
-                        System.out.println("Worker result: " + success);
                         
                         if (success) {
                             String message = isEditMode ? 
@@ -350,9 +333,7 @@ public class ResultLauncher extends JPanel {
                 }
             };
             
-            System.out.println("Starting swing worker...");
             worker.execute();
-            System.out.println("Swing worker started");
         }
     }
 

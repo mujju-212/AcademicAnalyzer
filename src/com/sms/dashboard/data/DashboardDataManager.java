@@ -22,9 +22,10 @@ public class DashboardDataManager {
     
     private void loadDataFromDatabase() {
         sectionStudents = new HashMap<>();
+        Connection conn = null;
         
         try {
-            Connection conn = DatabaseConnection.getConnection();
+            conn = DatabaseConnection.getConnection();
             
             // Get all sections for current user
             SectionDAO sectionDAO = new SectionDAO();
@@ -39,14 +40,23 @@ public class DashboardDataManager {
             e.printStackTrace();
             // Fall back to empty data
             sectionStudents = new HashMap<>();
+        } finally {
+            try {
+                if (conn != null) conn.close(); // CRITICAL: Return connection to pool!
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
     }
     
     private List<Student> getStudentsForSection(int sectionId) {
         List<Student> students = new ArrayList<>();
+        Connection conn = null;
+        PreparedStatement ps = null;
+        ResultSet rs = null;
         
         try {
-            Connection conn = DatabaseConnection.getConnection();
+            conn = DatabaseConnection.getConnection();
             String query = "SELECT s.student_name, s.roll_number, " +
                           "sub.subject_name, et.exam_name as exam_type, sm.marks_obtained " +
                           "FROM students s " +
@@ -55,10 +65,10 @@ public class DashboardDataManager {
                           "LEFT JOIN exam_types et ON sm.exam_type_id = et.id " +
                           "WHERE s.section_id = ? AND s.created_by = ?";
             
-            PreparedStatement ps = conn.prepareStatement(query);
+            ps = conn.prepareStatement(query);
             ps.setInt(1, sectionId);
             ps.setInt(2, currentUserId);
-            ResultSet rs = ps.executeQuery();
+            rs = ps.executeQuery();
             
             Map<String, Student> studentMap = new HashMap<>();
             
@@ -83,10 +93,16 @@ public class DashboardDataManager {
             
             students.addAll(studentMap.values());
             
-            rs.close();
-            ps.close();
         } catch (SQLException e) {
             e.printStackTrace();
+        } finally {
+            try {
+                if (rs != null) rs.close();
+                if (ps != null) ps.close();
+                if (conn != null) conn.close(); // CRITICAL: Return connection to pool!
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
         
         return students;

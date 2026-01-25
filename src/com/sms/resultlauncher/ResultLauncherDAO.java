@@ -43,10 +43,6 @@ public class ResultLauncherDAO {
     public boolean launchResults(int sectionId, List<Integer> studentIds, 
                                  List<Component> components, ResultConfiguration config) {
         
-        System.out.println("=== OPTIMIZED RESULT LAUNCHER ===");
-        System.out.println("Section: " + sectionId + " | Students: " + studentIds.size() + 
-                         " | Components: " + components.size());
-        
         Connection conn = null;
         try {
             conn = DatabaseConnection.getConnection();
@@ -60,8 +56,6 @@ public class ResultLauncherDAO {
                 return false;
             }
             
-            System.out.println("Launch ID: " + launchId);
-            
             // Step 2: Calculate results for ALL students efficiently (bulk operation)
             Map<Integer, StudentResult> studentResults = calculateAllStudentResults(
                 studentIds, components, sectionId);
@@ -72,17 +66,11 @@ public class ResultLauncherDAO {
                 return false;
             }
             
-            System.out.println("Calculated results for " + studentResults.size() + " students");
-            
             // Step 3: Calculate ranking using efficient sorting (O(n log n))
             List<StudentRanking> rankings = calculateRankings(studentResults);
             
             // Step 4: Calculate class statistics
             ClassStatistics classStats = calculateClassStatistics(studentResults);
-            
-            System.out.println("Class Stats - Avg: " + String.format("%.2f", classStats.average) + 
-                             "% | Highest: " + String.format("%.2f", classStats.highest) + 
-                             "% | Passing: " + classStats.passingCount + "/" + classStats.totalStudents);
             
             // Step 5: Store results in database with enhanced JSON (bulk insert)
             boolean stored = storeStudentResults(conn, launchId, studentResults, rankings, 
@@ -99,7 +87,6 @@ public class ResultLauncherDAO {
             }
             
             conn.commit(); // Commit transaction
-            System.out.println("✅ Launch completed successfully!");
             return true;
             
         } catch (Exception e) {
@@ -108,7 +95,6 @@ public class ResultLauncherDAO {
             try {
                 if (conn != null) {
                     conn.rollback();
-                    System.out.println("Transaction rolled back");
                 }
             } catch (SQLException ex) {
                 ex.printStackTrace();
@@ -359,7 +345,6 @@ public class ResultLauncherDAO {
             if (batchCount % 50 == 0) {
                 ps.executeBatch();
                 ps.clearBatch();
-                System.out.println("Stored batch of 50 records...");
             }
         }
         
@@ -369,7 +354,6 @@ public class ResultLauncherDAO {
         }
         
         ps.close();
-        System.out.println("Stored " + batchCount + " student results in database");
         return true;
     }
     
@@ -529,8 +513,9 @@ public class ResultLauncherDAO {
         
         if (studentIds.isEmpty()) return names;
         
+        Connection conn = null;
         try {
-            Connection conn = DatabaseConnection.getConnection();
+            conn = DatabaseConnection.getConnection();
             String placeholders = String.join(",", Collections.nCopies(studentIds.size(), "?"));
             String query = "SELECT id, student_name FROM students WHERE id IN (" + placeholders + ")";
             
@@ -550,6 +535,8 @@ public class ResultLauncherDAO {
         } catch (SQLException e) {
             System.err.println("Error loading student names: " + e.getMessage());
             e.printStackTrace();
+        } finally {
+            try { if (conn != null) conn.close(); } catch (Exception e) {}
         }
         
         return names;
@@ -562,8 +549,6 @@ public class ResultLauncherDAO {
     private void sendEmailNotifications(Connection conn, int launchId, 
                                        List<Integer> studentIds, ResultConfiguration config) {
         try {
-            System.out.println("Sending email notifications...");
-            
             boolean success = EmailService.sendResultNotifications(
                 studentIds, 
                 config.getEmailSubject(), 
@@ -579,8 +564,6 @@ public class ResultLauncherDAO {
             ps.executeUpdate();
             ps.close();
             
-            System.out.println("Email status updated: " + (success ? "✅ Success" : "⚠️ Failed"));
-            
         } catch (Exception e) {
             System.err.println("Error sending emails: " + e.getMessage());
             e.printStackTrace();
@@ -593,9 +576,10 @@ public class ResultLauncherDAO {
      */
     public List<LaunchedResult> getLaunchedResults() {
         List<LaunchedResult> results = new ArrayList<>();
+        Connection conn = null;
         
         try {
-            Connection conn = DatabaseConnection.getConnection();
+            conn = DatabaseConnection.getConnection();
             String query = "SELECT lr.*, s.section_name, u.username as launched_by_name " +
                           "FROM launched_results lr " +
                           "JOIN sections s ON lr.section_id = s.id " +
@@ -634,6 +618,8 @@ public class ResultLauncherDAO {
         } catch (SQLException e) {
             System.err.println("Error loading results: " + e.getMessage());
             e.printStackTrace();
+        } finally {
+            try { if (conn != null) conn.close(); } catch (Exception e) {}
         }
         
         return results;
@@ -644,8 +630,9 @@ public class ResultLauncherDAO {
      * Students will no longer be able to access this result.
      */
     public boolean takeDownResult(int launchId) {
+        Connection conn = null;
         try {
-            Connection conn = DatabaseConnection.getConnection();
+            conn = DatabaseConnection.getConnection();
             String query = "UPDATE launched_results SET status = 'inactive' " +
                           "WHERE id = ? AND launched_by = ?";
             
@@ -656,15 +643,13 @@ public class ResultLauncherDAO {
             int rows = ps.executeUpdate();
             ps.close();
             
-            if (rows > 0) {
-                System.out.println("Result " + launchId + " taken down successfully");
-            }
-            
             return rows > 0;
             
         } catch (SQLException e) {
             System.err.println("Error taking down result: " + e.getMessage());
             return false;
+        } finally {
+            try { if (conn != null) conn.close(); } catch (Exception e) {}
         }
     }
     
@@ -697,14 +682,7 @@ public class ResultLauncherDAO {
             
             conn.commit(); // Commit transaction
             
-            if (launchRows > 0) {
-                System.out.println("Result " + launchId + " deleted successfully. " +
-                                 "Removed " + studentRows + " student results.");
-                return true;
-            } else {
-                System.err.println("No result found with ID: " + launchId);
-                return false;
-            }
+            return launchRows > 0;
             
         } catch (SQLException e) {
             System.err.println("Error deleting result: " + e.getMessage());
@@ -739,8 +717,6 @@ public class ResultLauncherDAO {
             conn = DatabaseConnection.getConnection();
             conn.setAutoCommit(false); // Start transaction
             
-            System.out.println("Updating launch ID: " + launchId);
-            
             // 1. Get the section ID from the existing launch record
             String getSectionIdQuery = "SELECT section_id FROM launched_results WHERE id = ?";
             PreparedStatement getSectionPs = conn.prepareStatement(getSectionIdQuery);
@@ -765,7 +741,6 @@ public class ResultLauncherDAO {
             ps1.setInt(1, launchId);
             int deletedRows = ps1.executeUpdate();
             ps1.close();
-            System.out.println("Deleted " + deletedRows + " old student results");
             
             // 3. Calculate new results for all students (same as launchResults)
             Map<Integer, StudentResult> studentResults = calculateAllStudentResults(
@@ -791,7 +766,6 @@ public class ResultLauncherDAO {
                 System.err.println("Failed to store updated student results");
                 return false;
             }
-            System.out.println("Stored " + studentIds.size() + " updated student results");
             
             // 4. Update the launch record with new configuration
             String updateLaunch = "UPDATE launched_results SET " +
@@ -935,9 +909,10 @@ public class ResultLauncherDAO {
      */
     private List<Component> loadStudentComponentMarks(int studentId, int sectionId, AnalyzerDAO dao) {
         List<Component> studentComponents = new ArrayList<>();
+        Connection conn = null;
         
         try {
-            Connection conn = DatabaseConnection.getConnection();
+            conn = DatabaseConnection.getConnection();
             
             // Get all subjects for this section
             String subjectQuery = "SELECT DISTINCT sub.id, sub.subject_name FROM section_subjects ss " +
@@ -960,13 +935,9 @@ public class ResultLauncherDAO {
                 double subjectPercentage = result.percentage; // This is 0-100 per subject
                 totalObtained += subjectPercentage;
                 subjectCount++;
-                
-                System.out.println("  Subject: " + subjectName + " = " + String.format("%.2f", subjectPercentage) + "/100");
             }
             rs.close();
             ps.close();
-            
-            System.out.println("  Total: " + String.format("%.2f", totalObtained) + "/" + (subjectCount * 100));
             
             // Create a single "pseudo-component" representing the total
             // Total obtained = sum of all subject percentages
@@ -985,6 +956,8 @@ public class ResultLauncherDAO {
         } catch (Exception e) {
             System.err.println("Error loading marks: " + e.getMessage());
             e.printStackTrace();
+        } finally {
+            try { if (conn != null) conn.close(); } catch (Exception e) {}
         }
         
         return studentComponents;

@@ -49,6 +49,12 @@ public class SectionAnalyzer extends JPanel {
     private Map<String, Set<String>> selectedFilters; // Track selected subject-component combinations
     private Map<String, Set<String>> availableComponents; // All available components per subject
     private JPanel filterCard;
+    
+    // Performance optimization: Cache expensive calculations
+    private AnalyzerDAO.SectionAnalysisData cachedAnalysisData;
+    private AnalyzerDAO.DetailedRankingData cachedRankingData;
+    private Map<String, Set<String>> cachedFiltersForAnalysis;
+    private Map<String, Set<String>> cachedFiltersForRanking;
 
     // Constructor for standalone dialog (backward compatibility)
     public SectionAnalyzer(JFrame parent, HashMap<String, ArrayList<Student>> sectionStudents) {
@@ -252,13 +258,17 @@ public class SectionAnalyzer extends JPanel {
         mainContentPanel = new JPanel(new BorderLayout());
         mainContentPanel.setOpaque(false);
         
+        long overallStartTime = System.currentTimeMillis();
         createMainContent();
+        long overallTime = System.currentTimeMillis() - overallStartTime;
         
         mainPanel.add(mainContentPanel, BorderLayout.CENTER);
         add(mainPanel);
     }
 
     private void createMainContent() {
+        long methodStart = System.currentTimeMillis();
+        
         if (currentSectionId == 0) {
             JLabel noDataLabel = new JLabel("No sections available");
             noDataLabel.setHorizontalAlignment(SwingConstants.CENTER);
@@ -268,12 +278,28 @@ public class SectionAnalyzer extends JPanel {
             return;
         }
         
+        long dataFetchStart = System.currentTimeMillis();
         AnalyzerDAO analyzerDAO = new AnalyzerDAO();
-        AnalyzerDAO.SectionAnalysisData analysisData = analyzerDAO.getSectionAnalysisWithFilters(
-            currentSectionId, 
-            com.sms.login.LoginScreen.currentUserId,
-            selectedFilters
-        );
+        
+        // Check for cached analysis data to avoid expensive re-computation
+        AnalyzerDAO.SectionAnalysisData analysisData;
+        boolean filtersMatchAnalysis = (selectedFilters == null && cachedFiltersForAnalysis == null) ||
+                                      (selectedFilters != null && selectedFilters.equals(cachedFiltersForAnalysis));
+        
+        if (cachedAnalysisData != null && filtersMatchAnalysis) {
+            analysisData = cachedAnalysisData;
+        } else {
+            analysisData = analyzerDAO.getSectionAnalysisWithFilters(
+                currentSectionId, 
+                com.sms.login.LoginScreen.currentUserId,
+                selectedFilters
+            );
+            // Cache for future use
+            cachedAnalysisData = analysisData;
+            cachedFiltersForAnalysis = selectedFilters != null ? new HashMap<>(selectedFilters) : null;
+        }
+        
+        long dataFetchTime = System.currentTimeMillis() - dataFetchStart;
         
         if (analysisData == null) {
             JLabel noDataLabel = new JLabel("No data available for this section");
@@ -285,12 +311,14 @@ public class SectionAnalyzer extends JPanel {
         }
 
         // Main layout with filter on left
+        long layoutStart = System.currentTimeMillis();
         JPanel mainLayout = new JPanel(new BorderLayout(0, 0));
         mainLayout.setOpaque(false);
         
         // Add filter panel on the left
         JPanel filterPanel = createFilterPanel();
         mainLayout.add(filterPanel, BorderLayout.WEST);
+        long layoutTime = System.currentTimeMillis() - layoutStart;
         
         // Create scrollable content wrapper
         JPanel contentWrapper = new JPanel();
@@ -299,6 +327,7 @@ public class SectionAnalyzer extends JPanel {
         contentWrapper.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 15));
 
         // Section tabs
+        long tabStart = System.currentTimeMillis();
         JPanel tabsPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
         tabsPanel.setOpaque(false);
         tabsPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -391,7 +420,7 @@ public class SectionAnalyzer extends JPanel {
         
         JPanel gradeDistCard = createModernCard();
         gradeDistCard.setLayout(new BorderLayout());
-        gradeDistCard.add(createGradeDistributionChart(analyzerDAO), BorderLayout.CENTER);
+        gradeDistCard.add(createGradeDistributionChart(analysisData.gradeDistribution), BorderLayout.CENTER);
         
         row2.add(chartCard);
         row2.add(gradeDistCard);
@@ -427,7 +456,7 @@ public class SectionAnalyzer extends JPanel {
         
         JPanel atRiskCard = createModernCard();
         atRiskCard.setLayout(new BorderLayout());
-        atRiskCard.add(createAtRiskStudentsPanel(analyzerDAO), BorderLayout.CENTER);
+        atRiskCard.add(createAtRiskStudentsPanel(analysisData.atRiskStudents), BorderLayout.CENTER);
         
         atRiskRow.add(atRiskCard, BorderLayout.CENTER);
         contentWrapper.add(atRiskRow);
@@ -441,7 +470,7 @@ public class SectionAnalyzer extends JPanel {
         
         JPanel rankingCard = createModernCard();
         rankingCard.setLayout(new BorderLayout());
-        rankingCard.add(createAllStudentsRankingTable(analyzerDAO), BorderLayout.CENTER);
+        rankingCard.add(createAllStudentsRankingTable(analyzerDAO, analysisData), BorderLayout.CENTER);
         
         rankingRow.add(rankingCard, BorderLayout.CENTER);
         contentWrapper.add(rankingRow);
@@ -456,8 +485,15 @@ public class SectionAnalyzer extends JPanel {
         scrollPane.setOpaque(false);
         scrollPane.getViewport().setOpaque(false);
         
+        long tabTime = System.currentTimeMillis() - tabStart;
+        
+        long displayStart = System.currentTimeMillis();
+        
         mainLayout.add(scrollPane, BorderLayout.CENTER);
         mainContentPanel.add(mainLayout, BorderLayout.CENTER);
+        
+        long displayTime = System.currentTimeMillis() - displayStart;
+        long totalMethodTime = System.currentTimeMillis() - methodStart;
     }
 
     private JPanel createSectionResultAnalysis(AnalyzerDAO.SectionAnalysisData analysisData) {
@@ -680,8 +716,9 @@ public class SectionAnalyzer extends JPanel {
         double maxPossibleMarks = 100; // Default
         
         if (analysisData != null && analysisData.subjectAnalysisList != null) {
+            Connection conn = null;
             try {
-                Connection conn = DatabaseConnection.getConnection();
+                conn = DatabaseConnection.getConnection();
                 String maxMarksQuery = "SELECT MAX(ss.max_marks) as max_marks " +
                                      "FROM section_subjects ss " +
                                      "WHERE ss.section_id = ?";
@@ -695,6 +732,12 @@ public class SectionAnalyzer extends JPanel {
                 ps.close();
             } catch (SQLException e) {
                 e.printStackTrace();
+            } finally {
+                try {
+                    if (conn != null) conn.close();
+                } catch (SQLException e) {
+                    e.printStackTrace();
+                }
             }
             
             for (AnalyzerDAO.SubjectAnalysis subject : analysisData.subjectAnalysisList) {
@@ -1093,10 +1136,12 @@ public class SectionAnalyzer extends JPanel {
                 
                 @Override
                 protected void done() {
+                    long refreshStart = System.currentTimeMillis();
                     mainContentPanel.removeAll();
                     createMainContent();
                     mainContentPanel.revalidate();
                     mainContentPanel.repaint();
+                    long refreshTime = System.currentTimeMillis() - refreshStart;
                 }
             };
             worker.execute();
@@ -1106,6 +1151,12 @@ public class SectionAnalyzer extends JPanel {
     private void refreshDataOnly() {
         // Only refresh the data content, NOT the filter panel
         System.out.println("Refreshing data only with filters: " + selectedFilters.keySet());
+        
+        // Clear cache since filters changed
+        cachedAnalysisData = null;
+        cachedRankingData = null;
+        cachedFiltersForAnalysis = null;
+        cachedFiltersForRanking = null;
         
         SwingUtilities.invokeLater(() -> {
             // Find the content wrapper and update only that
@@ -1122,18 +1173,28 @@ public class SectionAnalyzer extends JPanel {
                         mainLayout.remove(mainComponents[i]);
                         
                         AnalyzerDAO analyzerDAO = new AnalyzerDAO();
-                        AnalyzerDAO.SectionAnalysisData analysisData = analyzerDAO.getSectionAnalysisWithFilters(
-                            currentSectionId, 
-                            com.sms.login.LoginScreen.currentUserId,
-                            selectedFilters
-                        );
+                        // Use cached data if available and filters match
+                        AnalyzerDAO.SectionAnalysisData analysisData;
+                        boolean filtersMatchUpdate = (selectedFilters == null && cachedFiltersForAnalysis == null) ||
+                                                   (selectedFilters != null && selectedFilters.equals(cachedFiltersForAnalysis));
+                        
+                        if (cachedAnalysisData != null && filtersMatchUpdate) {
+                            analysisData = cachedAnalysisData;
+                        } else {
+                            analysisData = analyzerDAO.getSectionAnalysisWithFilters(
+                                currentSectionId, 
+                                com.sms.login.LoginScreen.currentUserId,
+                                selectedFilters
+                            );
+                            // Cache the new data
+                            cachedAnalysisData = analysisData;
+                            cachedFiltersForAnalysis = selectedFilters != null ? new HashMap<>(selectedFilters) : null;
+                        }
                         
                         if (analysisData != null) {
                             // Create scrollable content wrapper
                             JPanel contentWrapper = new JPanel();
                             contentWrapper.setLayout(new BoxLayout(contentWrapper, BoxLayout.Y_AXIS));
-                            contentWrapper.setOpaque(false);
-                            contentWrapper.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 15));
 
                             // Section tabs
                             JPanel tabsPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
@@ -1224,7 +1285,7 @@ public class SectionAnalyzer extends JPanel {
                             
                             JPanel gradeDistCard = createModernCard();
                             gradeDistCard.setLayout(new BorderLayout());
-                            gradeDistCard.add(createGradeDistributionChart(analyzerDAO), BorderLayout.CENTER);
+                            gradeDistCard.add(createGradeDistributionChart(analysisData.gradeDistribution), BorderLayout.CENTER);
                             
                             row2.add(chartCard);
                             row2.add(gradeDistCard);
@@ -1260,7 +1321,7 @@ public class SectionAnalyzer extends JPanel {
                             
                             JPanel atRiskCard = createModernCard();
                             atRiskCard.setLayout(new BorderLayout());
-                            atRiskCard.add(createAtRiskStudentsPanel(analyzerDAO), BorderLayout.CENTER);
+                            atRiskCard.add(createAtRiskStudentsPanel(analysisData.atRiskStudents), BorderLayout.CENTER);
                             
                             atRiskRow.add(atRiskCard, BorderLayout.CENTER);
                             contentWrapper.add(atRiskRow);
@@ -1299,9 +1360,10 @@ public class SectionAnalyzer extends JPanel {
     
     private void loadAvailableComponentsForSection(int sectionId) {
         availableComponents = new HashMap<>();
+        Connection conn = null;
         
         try {
-            Connection conn = DatabaseConnection.getConnection();
+            conn = DatabaseConnection.getConnection();
             
             // Get all subjects configured for this section (even if no marks yet)
             // Plus all exam types that have marks data
@@ -1333,17 +1395,18 @@ public class SectionAnalyzer extends JPanel {
             rs.close();
             ps.close();
             
-            System.out.println("Loaded " + availableComponents.size() + " subjects for section " + sectionId);
-            for (String subject : availableComponents.keySet()) {
-                System.out.println("  Subject: " + subject + ", Components: " + availableComponents.get(subject));
-            }
-            
         } catch (SQLException e) {
             e.printStackTrace();
             JOptionPane.showMessageDialog(this, 
                 "Error loading available components: " + e.getMessage(), 
                 "Database Error", 
                 JOptionPane.ERROR_MESSAGE);
+        } finally {
+            try {
+                if (conn != null) conn.close();
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
     }
     
@@ -1354,7 +1417,6 @@ public class SectionAnalyzer extends JPanel {
             Set<String> components = new HashSet<>(availableComponents.get(subject));
             selectedFilters.put(subject, components);
         }
-        System.out.println("Initialized filters with " + selectedFilters.size() + " subjects");
     }
     
     private boolean isAllSelected() {
@@ -1382,8 +1444,6 @@ public class SectionAnalyzer extends JPanel {
         treePanel.setLayout(new BoxLayout(treePanel, BoxLayout.Y_AXIS));
         treePanel.setBackground(Color.WHITE);
         treePanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-        
-        System.out.println("Creating filter panel with " + availableComponents.size() + " subjects");
         
         // Overall checkbox
         JCheckBox overallCheck = new JCheckBox("Overall (All)", true);
@@ -1561,7 +1621,7 @@ public class SectionAnalyzer extends JPanel {
         treePanel.repaint();
     }
     
-    private JPanel createGradeDistributionChart(AnalyzerDAO analyzerDAO) {
+    private JPanel createGradeDistributionChart(List<AnalyzerDAO.GradeDistribution> gradeData) {
         JPanel panel = new JPanel(new BorderLayout());
         panel.setOpaque(false);
         
@@ -1571,8 +1631,7 @@ public class SectionAnalyzer extends JPanel {
         titleLabel.setForeground(TEXT_PRIMARY);
         titleLabel.setBorder(BorderFactory.createEmptyBorder(0, 0, 10, 0));
         
-        // Get grade distribution data
-        List<AnalyzerDAO.GradeDistribution> gradeData = analyzerDAO.getGradeDistribution(currentSectionId, selectedFilters);
+        // Use pre-calculated grade distribution data (NO DATABASE QUERY)
         
         // Create dataset
         DefaultCategoryDataset dataset = new DefaultCategoryDataset();
@@ -1628,7 +1687,7 @@ public class SectionAnalyzer extends JPanel {
         return panel;
     }
     
-    private JPanel createAtRiskStudentsPanel(AnalyzerDAO analyzerDAO) {
+    private JPanel createAtRiskStudentsPanel(List<AnalyzerDAO.AtRiskStudent> atRiskStudents) {
         JPanel panel = new JPanel(new BorderLayout());
         panel.setOpaque(false);
         
@@ -1638,8 +1697,7 @@ public class SectionAnalyzer extends JPanel {
         titleLabel.setForeground(TEXT_PRIMARY);
         titleLabel.setBorder(BorderFactory.createEmptyBorder(0, 0, 10, 0));
         
-        // Get at-risk students data
-        List<AnalyzerDAO.AtRiskStudent> atRiskStudents = analyzerDAO.getAtRiskStudents(currentSectionId, selectedFilters);
+        // Use pre-calculated at-risk students data (NO DATABASE QUERY)
         
         String[] columns = {"Roll No.", "Name", "Percentage", "Risk Level", "Failed Subjects"};
         DefaultTableModel model = new DefaultTableModel(columns, 0) {
@@ -1780,13 +1838,26 @@ public class SectionAnalyzer extends JPanel {
     
     private void exportToPDF() {
         try {
-            // Get analysis data
+            // Get analysis data (use cache if available)
             AnalyzerDAO analyzerDAO = new AnalyzerDAO();
-            AnalyzerDAO.SectionAnalysisData analysisData = analyzerDAO.getSectionAnalysisWithFilters(
-                currentSectionId,
-                com.sms.login.LoginScreen.currentUserId,
-                selectedFilters
-            );
+            AnalyzerDAO.SectionAnalysisData analysisData;
+            boolean filtersMatchExport = (selectedFilters == null && cachedFiltersForAnalysis == null) ||
+                                       (selectedFilters != null && selectedFilters.equals(cachedFiltersForAnalysis));
+            
+            if (cachedAnalysisData != null && filtersMatchExport) {
+                System.out.println("@@@ [OPTIMIZATION] PDF export using cached analysis data!");
+                analysisData = cachedAnalysisData;
+            } else {
+                System.out.println("@@@ [PDF_EXPORT] Fetching analysis data for PDF export...");
+                analysisData = analyzerDAO.getSectionAnalysisWithFilters(
+                    currentSectionId,
+                    com.sms.login.LoginScreen.currentUserId,
+                    selectedFilters
+                );
+                // Cache for future use
+                cachedAnalysisData = analysisData;
+                cachedFiltersForAnalysis = selectedFilters != null ? new HashMap<>(selectedFilters) : null;
+            }
             
             if (analysisData == null) {
                 JOptionPane.showMessageDialog(this, 
@@ -1818,27 +1889,9 @@ public class SectionAnalyzer extends JPanel {
             
             // Add Logo
             try {
-                java.io.InputStream logoStream = null;
-                // Try multiple paths
-                logoStream = getClass().getClassLoader().getResourceAsStream("resources/images/AA LOGO.png");
-                if (logoStream == null) {
-                    // Try from working directory
-                    java.io.File logoFile = new java.io.File("resources/images/AA LOGO.png");
-                    if (logoFile.exists()) {
-                        logoStream = new java.io.FileInputStream(logoFile);
-                    }
-                }
-                if (logoStream == null) {
-                    // Try from installed app directory
-                    java.io.File appLogoFile = new java.io.File(System.getProperty("user.dir") + "/resources/images/AA LOGO.png");
-                    if (appLogoFile.exists()) {
-                        logoStream = new java.io.FileInputStream(appLogoFile);
-                    }
-                }
-                if (logoStream != null) {
-                    byte[] logoBytes = logoStream.readAllBytes();
-                    logoStream.close();
-                    com.itextpdf.text.Image logo = com.itextpdf.text.Image.getInstance(logoBytes);
+                java.io.File logoFile = new java.io.File("resources/images/AA LOGO.png");
+                if (logoFile.exists()) {
+                    com.itextpdf.text.Image logo = com.itextpdf.text.Image.getInstance(logoFile.getAbsolutePath());
                     logo.scaleToFit(120, 72);
                     logo.setAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
                     document.add(logo);
@@ -2127,7 +2180,20 @@ public class SectionAnalyzer extends JPanel {
             document.add(new com.itextpdf.text.Paragraph(" "));
             
             // ==== SECTION 7: DETAILED RANKING TABLE ====
-            AnalyzerDAO.DetailedRankingData rankingData = analyzerDAO.getDetailedStudentRanking(currentSectionId, selectedFilters);
+            // Use cached ranking data if available and filters match
+            AnalyzerDAO.DetailedRankingData rankingData;
+            boolean filtersMatch = (selectedFilters == null && cachedFiltersForRanking == null) ||
+                                  (selectedFilters != null && selectedFilters.equals(cachedFiltersForRanking));
+            
+            if (cachedRankingData != null && filtersMatch) {
+                rankingData = cachedRankingData;
+            } else {
+                rankingData = analyzerDAO.getDetailedStudentRanking(currentSectionId, selectedFilters);
+                // Update cache
+                cachedRankingData = rankingData;
+                cachedFiltersForRanking = selectedFilters != null ? new HashMap<>(selectedFilters) : null;
+            }
+            
             if (rankingData != null && !rankingData.students.isEmpty()) {
                 // Add page break before ranking table
                 document.newPage();
@@ -2231,6 +2297,30 @@ public class SectionAnalyzer extends JPanel {
                 }
                 
                 // ==== DATA ROWS ====
+                // OPTIMIZATION: Pre-fetch all student IDs in single batch query to avoid N queries
+                Map<String, Integer> rollToIdMap = new HashMap<>();
+                Connection conn = null;
+                try {
+                    conn = DatabaseConnection.getConnection();
+                    String idsQuery = "SELECT id, roll_number FROM students WHERE section_id = ?";
+                    PreparedStatement psIds = conn.prepareStatement(idsQuery);
+                    psIds.setInt(1, currentSectionId);
+                    ResultSet rsIds = psIds.executeQuery();
+                    while (rsIds.next()) {
+                        rollToIdMap.put(rsIds.getString("roll_number"), rsIds.getInt("id"));
+                    }
+                    rsIds.close();
+                    psIds.close();
+                } catch (SQLException e) {
+                    e.printStackTrace();
+                } finally {
+                    try {
+                        if (conn != null) conn.close();
+                    } catch (SQLException e) {
+                        e.printStackTrace();
+                    }
+                }
+                
                 com.itextpdf.text.Font dataFont = new com.itextpdf.text.Font(com.itextpdf.text.Font.FontFamily.HELVETICA, 7, com.itextpdf.text.Font.NORMAL);
                 com.itextpdf.text.BaseColor gold = new com.itextpdf.text.BaseColor(255, 215, 0);
                 com.itextpdf.text.BaseColor silver = new com.itextpdf.text.BaseColor(192, 192, 192);
@@ -2264,17 +2354,11 @@ public class SectionAnalyzer extends JPanel {
                                 addStyledDataCell(rankingTable, display, rowBg, true, dataFont);
                             }
                             
-                            // Calculate WEIGHTED subject total using AnalyzerDAO method
-                            // Get student ID from database
-                            int studentId = getStudentIdByRollNumber(student.rollNumber, currentSectionId);
-                            double weightedPercentage = -1;  // Default to -1 (will show "-")
-                            if (studentId > 0) {
-                                AnalyzerDAO.SubjectPassResult result = analyzerDAO.calculateWeightedSubjectTotalWithPass(
-                                    studentId, currentSectionId, subject.subjectName, null);  // null = use all exam types
-                                // Use percentage directly (0-100 scale) - same as screen table
-                                weightedPercentage = result.percentage;
-                            }
-                            addStyledDataCell(rankingTable, weightedPercentage >= 0 ? String.format("%.2f", weightedPercentage) : "-", rowBg, true, dataFont);
+                            // OPTIMIZATION: Use pre-fetched student ID and subject total from rankingData
+                            // This avoids N×M queries (was calling calculateWeightedSubjectTotalWithPass for each student-subject pair)
+                            Double subjectTotal = student.subjectTotals.get(subject.subjectName);
+                            String totalDisplay = (subjectTotal != null && subjectTotal >= 0) ? String.format("%.2f", subjectTotal) : "-";
+                            addStyledDataCell(rankingTable, totalDisplay, rowBg, true, dataFont);
                         } else {
                             // No marks for this subject
                             for (String examType : subject.examTypes) {
@@ -2318,7 +2402,7 @@ public class SectionAnalyzer extends JPanel {
         }
     }
     
-    private JPanel createAllStudentsRankingTable(AnalyzerDAO analyzerDAO) {
+    private JPanel createAllStudentsRankingTable(AnalyzerDAO analyzerDAO, AnalyzerDAO.SectionAnalysisData analysisData) {
         JPanel panel = new JPanel(new BorderLayout());
         panel.setOpaque(false);
         
@@ -2328,8 +2412,20 @@ public class SectionAnalyzer extends JPanel {
         titleLabel.setForeground(TEXT_PRIMARY);
         titleLabel.setBorder(BorderFactory.createEmptyBorder(0, 0, 10, 0));
         
-        // Get detailed ranking data with subject breakdowns
-        AnalyzerDAO.DetailedRankingData rankingData = analyzerDAO.getDetailedStudentRanking(currentSectionId, selectedFilters);
+        // CRITICAL OPTIMIZATION: Use existing analysis data instead of expensive recalculation!
+        AnalyzerDAO.DetailedRankingData rankingData;
+        boolean filtersMatch = (selectedFilters == null && cachedFiltersForRanking == null) ||
+                              (selectedFilters != null && selectedFilters.equals(cachedFiltersForRanking));
+        
+        if (cachedRankingData != null && filtersMatch) {
+            rankingData = cachedRankingData;
+        } else {
+            // OPTIMIZATION: Create ranking data from already computed analysis data
+            rankingData = analyzerDAO.getDetailedStudentRankingFromAnalysisData(currentSectionId, analysisData, selectedFilters);
+            // Cache for future use
+            cachedRankingData = rankingData;
+            cachedFiltersForRanking = selectedFilters != null ? new HashMap<>(selectedFilters) : null;
+        }
         
         if (rankingData == null || rankingData.students.isEmpty()) {
             JLabel noDataLabel = new JLabel("No data available");
@@ -2369,8 +2465,6 @@ public class SectionAnalyzer extends JPanel {
         // Calculate subject widths from actual exam type widths
         List<Integer> subjectWidths = new ArrayList<>();
         for (AnalyzerDAO.SubjectInfoDetailed subject : rankingData.subjects) {
-            System.out.println("@@@ SUBJECT: " + subject.subjectName + 
-                " | examTypeMaxMarks map size: " + subject.examTypeMaxMarks.size() + " @@@");
             
             int totalSubjectWidth = 0;
             for (String examType : subject.examTypes) {
@@ -2410,7 +2504,10 @@ public class SectionAnalyzer extends JPanel {
             addHeaderCell(subjectNameRow, subjectHeader, subjectWidths.get(i), PRIMARY_COLOR, Color.WHITE, Font.BOLD, 12, subjectColSpan);
         }
         
-        addHeaderCell(subjectNameRow, "Overall Metrics", 340, PRIMARY_COLOR, Color.WHITE, Font.BOLD, 12, 4);
+        // Calculate total max marks (sum of all subject max marks)
+        int totalMaxMarks = rankingData.subjects.stream().mapToInt(s -> s.maxMarks).sum();
+        String overallHeader = "Overall Metrics (" + totalMaxMarks + ")";
+        addHeaderCell(subjectNameRow, overallHeader, 340, PRIMARY_COLOR, Color.WHITE, Font.BOLD, 12, 4);
         
         // ROW 2: Exam Types and Column Names
         JPanel examTypeRow = new JPanel();
@@ -2621,8 +2718,9 @@ public class SectionAnalyzer extends JPanel {
     
     // Helper method to get student ID by roll number
     private int getStudentIdByRollNumber(String rollNumber, int sectionId) {
+        Connection conn = null;
         try {
-            Connection conn = DatabaseConnection.getConnection();
+            conn = DatabaseConnection.getConnection();
             String query = "SELECT id FROM students WHERE roll_number = ? AND section_id = ?";
             PreparedStatement ps = conn.prepareStatement(query);
             ps.setString(1, rollNumber);
@@ -2639,6 +2737,12 @@ public class SectionAnalyzer extends JPanel {
         } catch (SQLException e) {
             e.printStackTrace();
             return 0;
+        } finally {
+            try {
+                if (conn != null) conn.close();
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
     }
     

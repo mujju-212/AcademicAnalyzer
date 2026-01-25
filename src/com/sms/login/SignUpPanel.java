@@ -81,11 +81,11 @@ public class SignUpPanel extends JPanel {
         ));
         card.setPreferredSize(new Dimension(520, 950));
         
-        // Logo
+        // Logo - load from resources folder directly
         try {
-            java.net.URL logoURL = getClass().getClassLoader().getResource("resources/images/AA LOGO.png");
-            if (logoURL != null) {
-                ImageIcon logoIcon = new ImageIcon(logoURL);
+            java.io.File logoFile = new java.io.File("resources/images/AA LOGO.png");
+            if (logoFile.exists()) {
+                ImageIcon logoIcon = new ImageIcon(logoFile.getAbsolutePath());
                 Image scaledImage = logoIcon.getImage().getScaledInstance(150, 90, Image.SCALE_SMOOTH);
                 JLabel logoLabel = new JLabel(new ImageIcon(scaledImage));
                 logoLabel.setAlignmentX(Component.CENTER_ALIGNMENT);

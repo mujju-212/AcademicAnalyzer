@@ -364,13 +364,16 @@ public class StudentAnalyzer extends JPanel {
     private int calculateStudentRank(int studentId) {
         // For performance, return simplified rank based on ID order
         // Full rank calculation with weighted totals is too slow for large sections
+        Connection conn = null;
+        PreparedStatement stmt = null;
+        ResultSet rs = null;
         try {
             String query = "SELECT COUNT(*) as rank FROM students WHERE section_id = (SELECT section_id FROM students WHERE id = ?) AND id < ?";
-            Connection conn = DatabaseConnection.getConnection();
-            PreparedStatement stmt = conn.prepareStatement(query);
+            conn = DatabaseConnection.getConnection();
+            stmt = conn.prepareStatement(query);
             stmt.setInt(1, studentId);
             stmt.setInt(2, studentId);
-            ResultSet rs = stmt.executeQuery();
+            rs = stmt.executeQuery();
             
             if (rs.next()) {
                 return rs.getInt("rank") + 1;
@@ -378,6 +381,14 @@ public class StudentAnalyzer extends JPanel {
             return 1;
         } catch (Exception e) {
             return 1;
+        } finally {
+            try {
+                if (rs != null) rs.close();
+                if (stmt != null) stmt.close();
+                if (conn != null) conn.close(); // CRITICAL: Return connection to pool!
+            } catch (Exception e) {
+                // Ignore cleanup errors
+            }
         }
     }
     
@@ -422,27 +433,9 @@ public class StudentAnalyzer extends JPanel {
                 
                 // Add Logo
                 try {
-                    java.io.InputStream logoStream = null;
-                    // Try multiple paths
-                    logoStream = getClass().getClassLoader().getResourceAsStream("resources/images/AA LOGO.png");
-                    if (logoStream == null) {
-                        // Try from working directory
-                        java.io.File logoFile = new java.io.File("resources/images/AA LOGO.png");
-                        if (logoFile.exists()) {
-                            logoStream = new java.io.FileInputStream(logoFile);
-                        }
-                    }
-                    if (logoStream == null) {
-                        // Try from installed app directory
-                        java.io.File appLogoFile = new java.io.File(System.getProperty("user.dir") + "/resources/images/AA LOGO.png");
-                        if (appLogoFile.exists()) {
-                            logoStream = new java.io.FileInputStream(appLogoFile);
-                        }
-                    }
-                    if (logoStream != null) {
-                        byte[] logoBytes = logoStream.readAllBytes();
-                        logoStream.close();
-                        com.itextpdf.text.Image logo = com.itextpdf.text.Image.getInstance(logoBytes);
+                    java.io.File logoFile = new java.io.File("resources/images/AA LOGO.png");
+                    if (logoFile.exists()) {
+                        com.itextpdf.text.Image logo = com.itextpdf.text.Image.getInstance(logoFile.getAbsolutePath());
                         logo.scaleToFit(120, 72);
                         logo.setAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
                         document.add(logo);
@@ -1920,24 +1913,29 @@ public class StudentAnalyzer extends JPanel {
      * Get section ID for a student
      */
     private int getStudentSectionId(int studentId) {
+        Connection conn = null;
+        PreparedStatement ps = null;
+        ResultSet rs = null;
         try {
-            Connection conn = DatabaseConnection.getConnection();
+            conn = DatabaseConnection.getConnection();
             String query = "SELECT section_id FROM students WHERE id = ?";
-            PreparedStatement ps = conn.prepareStatement(query);
+            ps = conn.prepareStatement(query);
             ps.setInt(1, studentId);
-            ResultSet rs = ps.executeQuery();
+            rs = ps.executeQuery();
             
             if (rs.next()) {
-                int sectionId = rs.getInt("section_id");
-                rs.close();
-                ps.close();
-                return sectionId;
+                return rs.getInt("section_id");
             }
-            
-            rs.close();
-            ps.close();
         } catch (SQLException e) {
             e.printStackTrace();
+        } finally {
+            try {
+                if (rs != null) rs.close();
+                if (ps != null) ps.close();
+                if (conn != null) conn.close(); // CRITICAL: Return connection to pool!
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
         return -1;
     }

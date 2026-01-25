@@ -747,7 +747,7 @@ public class CreateSectionPanel extends JPanel {
         // Load from subject_exam_types table which stores the configuration
         // This ensures we see exam types even before marks are entered
         // Try with max_marks first (new schema), fallback to weightage only (old schema)
-        String sql = "SELECT DISTINCT et.exam_name, et.weightage, et.passing_marks " +
+        String sql = "SELECT DISTINCT et.id, et.exam_name, et.weightage, et.passing_marks " +
                      "FROM exam_types et " +
                      "INNER JOIN subject_exam_types sext ON et.id = sext.exam_type_id " +
                      "WHERE sext.section_id = ? AND sext.subject_id = ? " +
@@ -1400,7 +1400,11 @@ public class CreateSectionPanel extends JPanel {
             if (conn != null) {
                 try {
                     conn.setAutoCommit(true);
-                    conn.close();
+                } catch (SQLException e) {
+                    e.printStackTrace();
+                }
+                try {
+                    conn.close(); // CRITICAL: Return connection to pool!
                 } catch (SQLException e) {
                     e.printStackTrace();
                 }

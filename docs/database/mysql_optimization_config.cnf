@@ -1,0 +1,52 @@
+# MySQL Configuration Optimization
+# Add these settings to your my.cnf or my.ini file
+# Location: C:\ProgramData\MySQL\MySQL Server 5.5\my.ini (Windows)
+#          /etc/mysql/my.cnf (Linux)
+
+[mysqld]
+# Query Cache Settings (MySQL 5.5 compatible)
+query_cache_type = 1
+query_cache_size = 64M
+query_cache_limit = 2M
+
+# InnoDB Buffer Pool (set to 70% of available RAM)
+# For 2GB RAM system, use 1G. For 4GB RAM, use 2G
+innodb_buffer_pool_size = 512M
+
+# Connection Settings
+max_connections = 100
+thread_cache_size = 8
+
+# InnoDB Settings
+innodb_flush_log_at_trx_commit = 2  # Better performance, minimal data loss risk
+innodb_log_file_size = 128M
+innodb_file_per_table = 1
+
+# Temporary Tables
+tmp_table_size = 32M
+max_heap_table_size = 32M
+
+# Sort Buffer
+sort_buffer_size = 1M
+read_rnd_buffer_size = 512K
+
+# MyISAM Settings (if any MyISAM tables exist)
+key_buffer_size = 32M
+
+# Logging
+slow_query_log = 1
+long_query_time = 2
+log_queries_not_using_indexes = 1
+
+# Binary Logging (if needed for replication)
+# log-bin = mysql-bin
+# binlog_format = mixed
+
+# Network Settings
+max_allowed_packet = 16M
+
+# Table Cache
+table_open_cache = 400
+
+# Thread Settings
+thread_stack = 256K

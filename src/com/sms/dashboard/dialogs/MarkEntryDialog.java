@@ -1345,40 +1345,54 @@ private void debugDropdownStates() {
     }
     
     private void loadExistingMarksForAllExams() {
-        // For each exam type, load existing marks
-        for (int examIndex = 0; examIndex < examTypes.size(); examIndex++) {
-            ExamTypeInfo exam = examTypes.get(examIndex);
+        // OPTIMIZED: Single query loads ALL marks for ALL exam types at once (eliminates N+1 query problem)
+        // Build IN clause for exam type IDs
+        StringBuilder examIdList = new StringBuilder();
+        Map<Integer, Integer> examIdToColumnIndex = new HashMap<>();
+        
+        for (int i = 0; i < examTypes.size(); i++) {
+            ExamTypeInfo exam = examTypes.get(i);
+            if (i > 0) examIdList.append(",");
+            examIdList.append(exam.id);
+            examIdToColumnIndex.put(exam.id, i + 2); // Column index in table
+        }
+        
+        if (examTypes.isEmpty()) return;
+        
+        try (Connection conn = DatabaseConnection.getConnection()) {
+            // Single efficient query with JOIN - loads ALL marks for ALL exams in ONE round-trip
+            String query = "SELECT s.roll_number, sm.exam_type_id, sm.marks_obtained " +
+                          "FROM entered_exam_marks sm " +
+                          "JOIN students s ON sm.student_id = s.id " +
+                          "WHERE sm.exam_type_id IN (" + examIdList.toString() + ") " +
+                          "AND sm.subject_id = ? " +
+                          "ORDER BY s.roll_number, sm.exam_type_id";
             
-            try (Connection conn = DatabaseConnection.getConnection()) {
-                // Load marks from entered_exam_marks table using exam_type_id FK
-                String query = "SELECT s.roll_number, sm.marks_obtained " +
-                              "FROM entered_exam_marks sm " +
-                              "JOIN students s ON sm.student_id = s.id " +
-                              "WHERE sm.exam_type_id = ? AND sm.subject_id = ?";
+            try (PreparedStatement ps = conn.prepareStatement(query)) {
+                ps.setInt(1, currentSubjectId);
                 
-                try (PreparedStatement ps = conn.prepareStatement(query)) {
-                    ps.setInt(1, exam.id);  // exam_type_id
-                    ps.setInt(2, currentSubjectId);
-                    
-                    try (ResultSet rs = ps.executeQuery()) {
-                        while (rs.next()) {
-                            String rollNumber = rs.getString("roll_number");
-                            int marks = rs.getInt("marks_obtained");
-                            
-                            // Find student row and set marks
-                            for (int row = 0; row < tableModel.getRowCount(); row++) {
-                                if (tableModel.getValueAt(row, 0).equals(rollNumber)) {
-                                    tableModel.setValueAt(String.valueOf(marks), row, examIndex + 2);
-                                    break;
-                                }
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        String rollNumber = rs.getString("roll_number");
+                        int examTypeId = rs.getInt("exam_type_id");
+                        int marks = rs.getInt("marks_obtained");
+                        
+                        Integer columnIndex = examIdToColumnIndex.get(examTypeId);
+                        if (columnIndex == null) continue;
+                        
+                        // Find student row and set marks
+                        for (int row = 0; row < tableModel.getRowCount(); row++) {
+                            if (tableModel.getValueAt(row, 0).equals(rollNumber)) {
+                                tableModel.setValueAt(String.valueOf(marks), row, columnIndex);
+                                break;
                             }
                         }
                     }
                 }
-            } catch (SQLException e) {
-                // Silently handle - no existing marks is OK
-                System.err.println("Info: No existing marks found for exam type: " + exam.name);
             }
+        } catch (SQLException e) {
+            System.err.println("Error loading existing marks: " + e.getMessage());
+            e.printStackTrace();
         }
         
         // Recalculate all totals
@@ -1624,66 +1638,47 @@ private void debugDropdownStates() {
                     conn = DatabaseConnection.getConnection();
                     conn.setAutoCommit(false);
                     
-                    // For each row (student)
-                    for (int row = 0; row < tableModel.getRowCount(); row++) {
-                        String rollNumber = (String) tableModel.getValueAt(row, 0);
-                        Integer studentId = studentIdMap.get(rollNumber);
-                        
-                        if (studentId == null) continue;
-                        
-                        // For each exam type
-                        for (int examIndex = 0; examIndex < examTypes.size(); examIndex++) {
-                            ExamTypeInfo exam = examTypes.get(examIndex);
-                            Object valueObj = tableModel.getValueAt(row, examIndex + 2);
-                            String value = valueObj != null ? valueObj.toString().trim() : "";
+                    // OPTIMIZED: Use REPLACE INTO for atomic upsert (faster than DELETE+INSERT)
+                    // Single PreparedStatement reused with batch operations
+                    String replaceQuery = "REPLACE INTO entered_exam_marks (student_id, exam_type_id, subject_id, marks_obtained, created_by) " +
+                                        "VALUES (?, ?, ?, ?, ?)";
+                    
+                    try (PreparedStatement ps = conn.prepareStatement(replaceQuery)) {
+                        // For each row (student)
+                        for (int row = 0; row < tableModel.getRowCount(); row++) {
+                            String rollNumber = (String) tableModel.getValueAt(row, 0);
+                            Integer studentId = studentIdMap.get(rollNumber);
                             
-                            if (!value.isEmpty()) {
-                                if (exam.id < 0) {
-                                    // Text-based exam type - use entered_exam_marks table
-                                    // Delete existing mark
-                                    String deleteQuery = "DELETE FROM entered_exam_marks WHERE student_id = ? AND exam_type = ? AND subject_id = ?";
-                                    try (PreparedStatement ps = conn.prepareStatement(deleteQuery)) {
-                                        ps.setInt(1, studentId);
-                                        ps.setString(2, exam.name);
-                                        ps.setInt(3, currentSubjectId);
-                                        ps.executeUpdate();
-                                    }
+                            if (studentId == null) continue;
+                            
+                            // For each exam type
+                            for (int examIndex = 0; examIndex < examTypes.size(); examIndex++) {
+                                ExamTypeInfo exam = examTypes.get(examIndex);
+                                Object valueObj = tableModel.getValueAt(row, examIndex + 2);
+                                String value = valueObj != null ? valueObj.toString().trim() : "";
+                                
+                                if (!value.isEmpty() && !value.equalsIgnoreCase("ABS")) {
+                                    // Add to batch (reuse same PreparedStatement)
+                                    ps.setInt(1, studentId);
+                                    ps.setInt(2, exam.id);
+                                    ps.setInt(3, currentSubjectId);
+                                    ps.setInt(4, (int) Double.parseDouble(value));
+                                    ps.setInt(5, currentUserId);
+                                    ps.addBatch();
+                                    savedCount++;
                                     
-                                    // Insert new mark
-                                    String insertQuery = "INSERT INTO entered_exam_marks (student_id, exam_type, subject_id, marks_obtained, created_by) VALUES (?, ?, ?, ?, ?)";
-                                    try (PreparedStatement ps = conn.prepareStatement(insertQuery)) {
-                                        ps.setInt(1, studentId);
-                                        ps.setString(2, exam.name);
-                                        ps.setInt(3, currentSubjectId);
-                                        ps.setInt(4, (int) Double.parseDouble(value));
-                                        ps.setInt(5, currentUserId);
-                                        ps.executeUpdate();
-                                        savedCount++;
-                                    }
-                                } else {
-                                    // ID-based exam type - use marks table
-                                    // Delete existing mark
-                                    String deleteQuery = "DELETE FROM marks WHERE student_id = ? AND exam_type_id = ? AND subject_id = ?";
-                                    try (PreparedStatement ps = conn.prepareStatement(deleteQuery)) {
-                                        ps.setInt(1, studentId);
-                                        ps.setInt(2, exam.id);
-                                        ps.setInt(3, currentSubjectId);
-                                        ps.executeUpdate();
-                                    }
-                                    
-                                    // Insert new mark
-                                    String insertQuery = "INSERT INTO marks (student_id, exam_type_id, subject_id, marks, created_by) VALUES (?, ?, ?, ?, ?)";
-                                    try (PreparedStatement ps = conn.prepareStatement(insertQuery)) {
-                                        ps.setInt(1, studentId);
-                                        ps.setInt(2, exam.id);
-                                        ps.setInt(3, currentSubjectId);
-                                        ps.setDouble(4, Double.parseDouble(value));
-                                        ps.setInt(5, currentUserId);
-                                        ps.executeUpdate();
-                                        savedCount++;
+                                    // Execute batch every 100 entries to avoid memory issues
+                                    if (savedCount % 100 == 0) {
+                                        ps.executeBatch();
+                                        ps.clearBatch();
                                     }
                                 }
                             }
+                        }
+                        
+                        // Execute remaining batch
+                        if (savedCount % 100 != 0) {
+                            ps.executeBatch();
                         }
                     }
                     
@@ -2377,27 +2372,9 @@ private void debugDropdownStates() {
                     
                     // Add Logo
                     try {
-                        java.io.InputStream logoStream = null;
-                        // Try multiple paths
-                        logoStream = getClass().getClassLoader().getResourceAsStream("resources/images/AA LOGO.png");
-                        if (logoStream == null) {
-                            // Try from working directory
-                            java.io.File logoFile = new java.io.File("resources/images/AA LOGO.png");
-                            if (logoFile.exists()) {
-                                logoStream = new java.io.FileInputStream(logoFile);
-                            }
-                        }
-                        if (logoStream == null) {
-                            // Try from installed app directory
-                            java.io.File appLogoFile = new java.io.File(System.getProperty("user.dir") + "/resources/images/AA LOGO.png");
-                            if (appLogoFile.exists()) {
-                                logoStream = new java.io.FileInputStream(appLogoFile);
-                            }
-                        }
-                        if (logoStream != null) {
-                            byte[] logoBytes = logoStream.readAllBytes();
-                            logoStream.close();
-                            com.itextpdf.text.Image logo = com.itextpdf.text.Image.getInstance(logoBytes);
+                        java.io.File logoFile = new java.io.File("resources/images/AA LOGO.png");
+                        if (logoFile.exists()) {
+                            com.itextpdf.text.Image logo = com.itextpdf.text.Image.getInstance(logoFile.getAbsolutePath());
                             logo.scaleToFit(120, 72);
                             logo.setAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
                             document.add(logo);

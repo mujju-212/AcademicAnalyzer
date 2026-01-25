@@ -21,7 +21,6 @@ public class SectionService {
      * Gets all sections for a specific user
      */
     public List<SectionInfo> getSectionsByUser(int userId) {
-        System.out.println("SectionService.getSectionsByUser called for userId: " + userId);
         return sectionDAO.getSectionsByUser(userId);
     }
     

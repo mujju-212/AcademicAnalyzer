@@ -717,7 +717,6 @@ public class ViewSelectionTool extends JPanel {
         selectedFilters.clear();
         
         String selectedSection = (String) sectionDropdown.getSelectedItem();
-        System.out.println("Selected section: " + selectedSection);
         
         if (selectedSection == null || selectedSection.equals("All Sections")) {
             JLabel infoLabel = new JLabel("Please select a specific section to view exam filters");
@@ -875,9 +874,12 @@ public class ViewSelectionTool extends JPanel {
     
     private Map<String, List<String>> getSubjectExamTypesForSection(int sectionId) {
         Map<String, List<String>> subjectExamTypes = new LinkedHashMap<>();
+        Connection conn = null;
+        PreparedStatement ps = null;
+        ResultSet rs = null;
         
         try {
-            Connection conn = DatabaseConnection.getConnection();
+            conn = DatabaseConnection.getConnection();
             
             String query = "SELECT DISTINCT s.subject_name, et.exam_name " +
                           "FROM section_subjects ss " +
@@ -887,9 +889,9 @@ public class ViewSelectionTool extends JPanel {
                           "WHERE ss.section_id = ? " +
                           "ORDER BY s.subject_name, et.exam_name";
             
-            PreparedStatement ps = conn.prepareStatement(query);
+            ps = conn.prepareStatement(query);
             ps.setInt(1, sectionId);
-            ResultSet rs = ps.executeQuery();
+            rs = ps.executeQuery();
             
             while (rs.next()) {
                 String subjectName = rs.getString("subject_name");
@@ -898,11 +900,16 @@ public class ViewSelectionTool extends JPanel {
                 subjectExamTypes.putIfAbsent(subjectName, new ArrayList<>());
                 subjectExamTypes.get(subjectName).add(examName);
             }
-            
-            rs.close();
-            ps.close();
         } catch (SQLException e) {
             e.printStackTrace();
+        } finally {
+            try {
+                if (rs != null) rs.close();
+                if (ps != null) ps.close();
+                if (conn != null) conn.close();
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
         
         return subjectExamTypes;
@@ -910,9 +917,14 @@ public class ViewSelectionTool extends JPanel {
     
     private Map<String, Map<String, Integer>> getMaxMarksForSection(int sectionId) {
         Map<String, Map<String, Integer>> maxMarksMap = new LinkedHashMap<>();
+        Connection conn = null;
+        PreparedStatement ps1 = null;
+        PreparedStatement ps3 = null;
+        ResultSet rs1 = null;
+        ResultSet rs3 = null;
         
         try {
-            Connection conn = DatabaseConnection.getConnection();
+            conn = DatabaseConnection.getConnection();
             
             // Step 1: Get subjects and their max marks for this section (same as Section Analyzer)
             String subjectQuery = 
@@ -922,9 +934,9 @@ public class ViewSelectionTool extends JPanel {
                 "WHERE ss.section_id = ? " +
                 "ORDER BY sub.subject_name";
             
-            PreparedStatement ps1 = conn.prepareStatement(subjectQuery);
+            ps1 = conn.prepareStatement(subjectQuery);
             ps1.setInt(1, sectionId);
-            ResultSet rs1 = ps1.executeQuery();
+            rs1 = ps1.executeQuery();
             
             Map<String, Integer> subjectIds = new HashMap<>();
             
@@ -952,10 +964,10 @@ public class ViewSelectionTool extends JPanel {
                     "WHERE sm.subject_id = ? AND s.section_id = ? " +
                     "ORDER BY et.exam_name";
                 
-                PreparedStatement ps3 = conn.prepareStatement(examTypeQuery1);
+                ps3 = conn.prepareStatement(examTypeQuery1);
                 ps3.setInt(1, subjectId);
                 ps3.setInt(2, sectionId);
-                ResultSet rs3 = ps3.executeQuery();
+                rs3 = ps3.executeQuery();
                 
                 while (rs3.next()) {
                     String examType = rs3.getString("exam_name");
@@ -974,6 +986,16 @@ public class ViewSelectionTool extends JPanel {
             
         } catch (SQLException e) {
             e.printStackTrace();
+        } finally {
+            try {
+                if (rs3 != null) rs3.close();
+                if (ps3 != null) ps3.close();
+                if (rs1 != null) rs1.close();
+                if (ps1 != null) ps1.close();
+                if (conn != null) conn.close();
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
         
         return maxMarksMap;
@@ -992,9 +1014,6 @@ public class ViewSelectionTool extends JPanel {
 
     private void displaySelectedData() {
         String selectedSection = (String) sectionDropdown.getSelectedItem();
-        System.out.println("\n=== USER SELECTED SECTION ===");
-        System.out.println("Selected: '" + selectedSection + "'");
-        System.out.println("Available keys: " + sectionStudents.keySet());
         
         if (selectedSection == null) {
             showStyledMessage("Please select a section!", "No Section Selected", JOptionPane.WARNING_MESSAGE);
@@ -1185,13 +1204,10 @@ public class ViewSelectionTool extends JPanel {
             // Normal mode: fetch from selected section
             // Add data rows
             if (selectedSection.equals("All Sections")) {
-                System.out.println("DEBUG: Total sections: " + sectionStudents.size());
-                
                 // Display data from all sections
                 for (Map.Entry<String, List<Student>> entry : sectionStudents.entrySet()) {
                     String section = entry.getKey();
                     List<Student> students = entry.getValue();
-                    System.out.println("DEBUG: Section " + section + " has " + students.size() + " students");
                     
                     for (Student student : students) {
                         ExtendedStudentData data = getExtendedStudentData(student, section, selectedSubjects);
@@ -1203,7 +1219,6 @@ public class ViewSelectionTool extends JPanel {
             } else {
                 // Display data from selected section
                 List<Student> students = sectionStudents.get(selectedSection);
-                System.out.println("DEBUG: Students in section: " + (students != null ? students.size() : "null"));
                 
                 if (students != null) {
                     for (Student student : students) {
@@ -1398,20 +1413,22 @@ public class ViewSelectionTool extends JPanel {
         data.section = section;
         data.subjectMarks = student.getMarks() != null ? student.getMarks() : new HashMap<String, Map<String, Integer>>();
         
-        System.out.println("DEBUG: Processing student: " + data.name + " (" + data.rollNumber + ")");
         // Get section ID for this section
         int sectionId = getSectionIdByName(section);
         // Get additional info from database
+        Connection conn = null;
+        PreparedStatement ps = null;
+        ResultSet rs = null;
         try {
-            Connection conn = DatabaseConnection.getConnection();
+            conn = DatabaseConnection.getConnection();
             String query = "SELECT s.email, s.phone, sec.academic_year, sec.semester " +
                           "FROM students s " +
                           "JOIN sections sec ON s.section_id = sec.id " +
                           "WHERE s.roll_number = ? AND s.created_by = ?";
-            PreparedStatement ps = conn.prepareStatement(query);
+            ps = conn.prepareStatement(query);
             ps.setString(1, student.getRollNumber());
             ps.setInt(2, com.sms.login.LoginScreen.currentUserId);
-            ResultSet rs = ps.executeQuery();
+            rs = ps.executeQuery();
             
             if (rs.next()) {
                 data.email = rs.getString("email");
@@ -1419,12 +1436,17 @@ public class ViewSelectionTool extends JPanel {
                 data.year = rs.getInt("academic_year");
                 data.semester = rs.getInt("semester");
             }
-            
-            rs.close();
-            ps.close();
         } catch (SQLException e) {
-            System.out.println("DEBUG: SQL Error getting student info: " + e.getMessage());
+            System.err.println("ERROR: SQL Error getting student info: " + e.getMessage());
             e.printStackTrace();
+        } finally {
+            try {
+                if (rs != null) rs.close();
+                if (ps != null) ps.close();
+                if (conn != null) conn.close();
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
         
         // Calculate academic metrics
@@ -1458,8 +1480,9 @@ public class ViewSelectionTool extends JPanel {
         data.totalGradePoints = 0;
         data.failedSubjectsCount = 0;
         
+        Connection conn = null;
         try {
-            Connection conn = DatabaseConnection.getConnection();
+            conn = DatabaseConnection.getConnection();
             
             // Get student ID from roll number
             String studentIdQuery = "SELECT id FROM students WHERE roll_number = ? AND section_id = ?";
@@ -1476,7 +1499,7 @@ public class ViewSelectionTool extends JPanel {
             psStudent.close();
             
             if (studentId == 0) {
-                System.out.println("ERROR: Student ID not found for roll number: " + data.rollNumber);
+                System.err.println("ERROR: Student ID not found for roll number: " + data.rollNumber);
                 return;
             }
             
@@ -1541,9 +1564,6 @@ public class ViewSelectionTool extends JPanel {
                 // Student fails if ANY component didn't meet its passing threshold
                 if (!result.allComponentsPassed) {
                     data.failedSubjectsCount++;
-                    System.out.println("FAILED Subject: " + subjectName + 
-                                     " | Weighted%: " + String.format("%.2f", weightedPercentage) +
-                                     " | Failed Components: " + result.failedComponents);
                 }
             }
             
@@ -1563,30 +1583,32 @@ public class ViewSelectionTool extends JPanel {
             
             // Calculate CGPA using proper formula:
             // CGPA = Σ[(subjectPercentage/10) × credit] / Σ[credit]
+            // OPTIMIZED: Pre-load all credits in one query instead of nested loop
             if (data.totalCredits > 0) {
+                // Build credit map from already-loaded subject data (credit already loaded in main query)
+                Map<String, Integer> subjectCredits = new HashMap<>();
+                
+                // Load all credits for section in single query
+                String creditQuery = "SELECT sub.subject_name, ss.credit FROM section_subjects ss " +
+                                   "JOIN subjects sub ON ss.subject_id = sub.id " +
+                                   "WHERE ss.section_id = ?";
+                PreparedStatement psCredits = conn.prepareStatement(creditQuery);
+                psCredits.setInt(1, sectionId);
+                ResultSet rsCredits = psCredits.executeQuery();
+                while (rsCredits.next()) {
+                    subjectCredits.put(rsCredits.getString("subject_name"), rsCredits.getInt("credit"));
+                }
+                rsCredits.close();
+                psCredits.close();
+                
+                // Now calculate weighted points using cached map
                 double totalWeightedPoints = 0.0;
                 for (Map.Entry<String, Double> entry : data.subjectWeightedTotals.entrySet()) {
-                    // Get credit for this subject from database
                     String subjectName = entry.getKey();
                     double percentage = entry.getValue();
-                    
-                    // Find credit for this subject
-                    try {
-                        String creditQuery = "SELECT ss.credit FROM section_subjects ss " +
-                                           "JOIN subjects sub ON ss.subject_id = sub.id " +
-                                           "WHERE ss.section_id = ? AND sub.subject_name = ?";
-                        PreparedStatement psCredit = conn.prepareStatement(creditQuery);
-                        psCredit.setInt(1, sectionId);
-                        psCredit.setString(2, subjectName);
-                        ResultSet rsCredit = psCredit.executeQuery();
-                        if (rsCredit.next()) {
-                            int credit = rsCredit.getInt("credit");
-                            totalWeightedPoints += (percentage / 10.0) * credit;
-                        }
-                        rsCredit.close();
-                        psCredit.close();
-                    } catch (SQLException e) {
-                        e.printStackTrace();
+                    Integer credit = subjectCredits.get(subjectName);
+                    if (credit != null) {
+                        totalWeightedPoints += (percentage / 10.0) * credit;
                     }
                 }
                 data.sgpa = totalWeightedPoints / data.totalCredits;
@@ -1605,14 +1627,23 @@ public class ViewSelectionTool extends JPanel {
             
         } catch (SQLException e) {
             e.printStackTrace();
+        } finally {
+            try {
+                if (conn != null) conn.close();
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
     }
     
     // Helper method to get student marks from database (same approach as Section Analyzer)
     private Map<String, Map<String, Integer>> getStudentMarksFromDB(int studentId, int sectionId) {
         Map<String, Map<String, Integer>> marks = new HashMap<>();
+        Connection conn = null;
+        PreparedStatement ps = null;
+        ResultSet rs = null;
         try {
-            Connection conn = DatabaseConnection.getConnection();
+            conn = DatabaseConnection.getConnection();
             
             // Same query as Section Analyzer uses
             String query = "SELECT sub.subject_name, et.exam_name, sm.marks_obtained " +
@@ -1622,9 +1653,9 @@ public class ViewSelectionTool extends JPanel {
                           "WHERE sm.student_id = ? " +
                           "ORDER BY sub.subject_name, et.exam_name";
             
-            PreparedStatement ps = conn.prepareStatement(query);
+            ps = conn.prepareStatement(query);
             ps.setInt(1, studentId);
-            ResultSet rs = ps.executeQuery();
+            rs = ps.executeQuery();
             
             while (rs.next()) {
                 String subjectName = rs.getString("subject_name");
@@ -1634,29 +1665,37 @@ public class ViewSelectionTool extends JPanel {
                 marks.computeIfAbsent(subjectName, k -> new HashMap<>()).put(examName, marksObtained);
             }
             
-            rs.close();
-            ps.close();
-            
         } catch (SQLException e) {
             e.printStackTrace();
+        } finally {
+            try {
+                if (rs != null) rs.close();
+                if (ps != null) ps.close();
+                if (conn != null) conn.close();
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
         return marks;
     }
     
     private String getLaunchedResultsInfo(int studentId) {
         StringBuilder info = new StringBuilder();
+        Connection conn = null;
+        PreparedStatement ps = null;
+        ResultSet rs = null;
         
         try {
-            Connection conn = DatabaseConnection.getConnection();
+            conn = DatabaseConnection.getConnection();
             
             String query = "SELECT launch_id, created_at " +
                           "FROM launched_student_results " +
                           "WHERE student_id = ? " +
                           "ORDER BY created_at DESC";
             
-            PreparedStatement ps = conn.prepareStatement(query);
+            ps = conn.prepareStatement(query);
             ps.setInt(1, studentId);
-            ResultSet rs = ps.executeQuery();
+            rs = ps.executeQuery();
             
             java.text.SimpleDateFormat dateFormat = new java.text.SimpleDateFormat("dd-MMM-yyyy");
             
@@ -1670,12 +1709,17 @@ public class ViewSelectionTool extends JPanel {
                     .append(dateFormat.format(rs.getTimestamp("created_at")))
                     .append(")");
             }
-            
-            rs.close();
-            ps.close();
         } catch (SQLException e) {
             e.printStackTrace();
             return "Error fetching launched results";
+        } finally {
+            try {
+                if (rs != null) rs.close();
+                if (ps != null) ps.close();
+                if (conn != null) conn.close();
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
         
         return info.length() > 0 ? info.toString() : "None";
@@ -1683,9 +1727,12 @@ public class ViewSelectionTool extends JPanel {
     
     private List<ExtendedStudentData> getStudentsFromLaunchedResult(int launchId, List<String> selectedSubjects) {
         List<ExtendedStudentData> studentDataList = new ArrayList<>();
+        Connection conn = null;
+        PreparedStatement ps = null;
+        ResultSet rs = null;
         
         try {
-            Connection conn = DatabaseConnection.getConnection();
+            conn = DatabaseConnection.getConnection();
             
             // Get all students from this launch with their result data
             String query = "SELECT lsr.student_id, lsr.created_at, lsr.result_data, " +
@@ -1696,9 +1743,9 @@ public class ViewSelectionTool extends JPanel {
                           "WHERE lsr.launch_id = ? " +
                           "ORDER BY s.roll_number";
             
-            PreparedStatement ps = conn.prepareStatement(query);
+            ps = conn.prepareStatement(query);
             ps.setInt(1, launchId);
-            ResultSet rs = ps.executeQuery();
+            rs = ps.executeQuery();
             
             java.text.SimpleDateFormat dateFormat = new java.text.SimpleDateFormat("dd-MMM-yyyy hh:mm a");
             
@@ -1722,11 +1769,16 @@ public class ViewSelectionTool extends JPanel {
                 
                 studentDataList.add(data);
             }
-            
-            rs.close();
-            ps.close();
         } catch (SQLException e) {
             e.printStackTrace();
+        } finally {
+            try {
+                if (rs != null) rs.close();
+                if (ps != null) ps.close();
+                if (conn != null) conn.close();
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
         
         return studentDataList;
@@ -1785,7 +1837,6 @@ public class ViewSelectionTool extends JPanel {
                     data.subjectMaxMarks.put(subjectName, examMaxMarksMap);
                 }
                 
-                System.out.println("DEBUG: Found subject: " + subjectName + " = " + weightedTotal + " (" + (passed ? "passed" : "failed") + ")");
                 data.subjectWeightedTotals.put(subjectName, weightedTotal);
                 data.subjectPassStatus.put(subjectName, passed);
                 
@@ -1962,8 +2013,6 @@ public class ViewSelectionTool extends JPanel {
                 if (!filePath.endsWith(".xlsx")) {
                     filePath += ".xlsx";
                 }
-                
-                System.out.println("Saving Excel file to: " + filePath); // Debug
                 
                 workbook = new XSSFWorkbook();
                 Sheet sheet = workbook.createSheet("Student Data");
@@ -2190,8 +2239,6 @@ public class ViewSelectionTool extends JPanel {
                 workbook.write(fileOut);
                 fileOut.flush();
                 
-                System.out.println("Excel file saved successfully!"); // Debug
-                
                 showStyledMessage("Data exported successfully to:\n" + filePath, "Export Successful", JOptionPane.INFORMATION_MESSAGE);
                 
                 // Optionally open the file
@@ -2254,27 +2301,9 @@ public class ViewSelectionTool extends JPanel {
                 
                 // Add Logo
                 try {
-                    java.io.InputStream logoStream = null;
-                    // Try multiple paths
-                    logoStream = getClass().getClassLoader().getResourceAsStream("resources/images/AA LOGO.png");
-                    if (logoStream == null) {
-                        // Try from working directory
-                        java.io.File logoFile = new java.io.File("resources/images/AA LOGO.png");
-                        if (logoFile.exists()) {
-                            logoStream = new java.io.FileInputStream(logoFile);
-                        }
-                    }
-                    if (logoStream == null) {
-                        // Try from installed app directory
-                        java.io.File appLogoFile = new java.io.File(System.getProperty("user.dir") + "/resources/images/AA LOGO.png");
-                        if (appLogoFile.exists()) {
-                            logoStream = new java.io.FileInputStream(appLogoFile);
-                        }
-                    }
-                    if (logoStream != null) {
-                        byte[] logoBytes = logoStream.readAllBytes();
-                        logoStream.close();
-                        com.itextpdf.text.Image logo = com.itextpdf.text.Image.getInstance(logoBytes);
+                    java.io.File logoFile = new java.io.File("resources/images/AA LOGO.png");
+                    if (logoFile.exists()) {
+                        com.itextpdf.text.Image logo = com.itextpdf.text.Image.getInstance(logoFile.getAbsolutePath());
                         logo.scaleToFit(120, 72);
                         logo.setAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
                         document.add(logo);

@@ -3,6 +3,8 @@ import javax.swing.JOptionPane;
 import com.formdev.flatlaf.FlatLightLaf;
 import com.sms.login.AuthenticationFrame;
 import com.sms.util.ConfigLoader;
+import com.sms.database.DatabaseConnection;
+import com.sms.util.BackgroundTask;
 
 public class Main {
     public static void main(String[] args) {
@@ -32,7 +34,16 @@ public class Main {
                 "Working directory: " + System.getProperty("user.dir"),
                 "Configuration Error",
                 JOptionPane.ERROR_MESSAGE);
+            return;
         }
+
+        // Add shutdown hook to close connection pool gracefully
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            System.out.println("\nShutting down application...");
+            BackgroundTask.shutdown();
+            DatabaseConnection.shutdown();
+            System.out.println("✓ Cleanup complete");
+        }));
 
         // Show login screen
         new AuthenticationFrame();

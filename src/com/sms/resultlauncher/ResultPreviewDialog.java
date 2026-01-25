@@ -6,8 +6,14 @@ import javax.swing.table.DefaultTableCellRenderer;
 import java.awt.*;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.Map;
+import java.util.HashMap;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 
 import com.sms.calculation.models.Component;
+import com.sms.database.DatabaseConnection;
 import com.sms.calculation.models.CalculationResult;
 import com.sms.calculation.StudentCalculator;
 import com.sms.dao.AnalyzerDAO;
@@ -25,6 +31,11 @@ public class ResultPreviewDialog extends JDialog {
     private List<String> columnList; // Shared column list
     private List<Integer> columnWidths; // Shared column widths
     
+    // OPTIMIZATION: Cache for batch-loaded data
+    private Map<Integer, Map<String, Map<String, Double>>> allStudentMarksCache; // studentId -> subject -> exam -> marks
+    private Map<Integer, List<Component>> allStudentComponentsCache; // studentId -> components
+    private String markingSystem; // Cache marking system
+    
     public ResultPreviewDialog(Window parent, int sectionId, List<Integer> studentIds, List<Component> components) {
         super(parent, "Result Preview", ModalityType.APPLICATION_MODAL);
         this.sectionId = sectionId;
@@ -35,8 +46,6 @@ public class ResultPreviewDialog extends JDialog {
         try {
             AnalyzerDAO dao = new AnalyzerDAO();
             this.storedRankingData = dao.getDetailedStudentRanking(sectionId, null);
-            System.out.println("Loaded ranking data with " + 
-                (storedRankingData != null ? storedRankingData.subjects.size() + " subjects" : "null"));
         } catch (Exception e) {
             System.err.println("Error loading ranking data: " + e.getMessage());
             e.printStackTrace();
@@ -110,7 +119,6 @@ public class ResultPreviewDialog extends JDialog {
         tableWithHeaderPanel.setBackground(Color.WHITE);
         
         if (hierarchicalHeaderPanel != null) {
-            System.out.println("DEBUG: Header panel height = " + hierarchicalHeaderPanel.getPreferredSize().height);
             // Force header panel to match table width
             int totalTableWidth = columnWidths.stream().mapToInt(Integer::intValue).sum();
             hierarchicalHeaderPanel.setPreferredSize(new Dimension(totalTableWidth, hierarchicalHeaderPanel.getPreferredSize().height));
@@ -194,10 +202,6 @@ public class ResultPreviewDialog extends JDialog {
     
     private void createPreviewTable() {
         // Use pre-loaded storedRankingData from constructor
-        if (storedRankingData != null) {
-            System.out.println("DEBUG: subjects count = " + storedRankingData.subjects.size());
-        }
-        
         if (storedRankingData == null || storedRankingData.subjects.isEmpty() || columnList == null) {
             // Fallback to simple table
             String[] columns = {"Rank", "Name", "Roll", "Section", "Total", "%", "Grade", "CGPA", "Status"};
@@ -241,9 +245,12 @@ public class ResultPreviewDialog extends JDialog {
         previewTable.setSelectionForeground(ResultLauncherUtils.TEXT_PRIMARY);
         previewTable.setAutoResizeMode(JTable.AUTO_RESIZE_OFF); // Enable horizontal scrolling
         
-        // Set column widths based on calculated values (matching header widths)
+        // Set column widths EXACTLY to match header (use min/max/preferred for precise alignment)
         for (int i = 0; i < columnWidths.size(); i++) {
-            previewTable.getColumnModel().getColumn(i).setPreferredWidth(columnWidths.get(i));
+            int width = columnWidths.get(i);
+            previewTable.getColumnModel().getColumn(i).setPreferredWidth(width);
+            previewTable.getColumnModel().getColumn(i).setMinWidth(width);
+            previewTable.getColumnModel().getColumn(i).setMaxWidth(width);
         }
         
         // Custom cell renderer
@@ -359,34 +366,28 @@ public class ResultPreviewDialog extends JDialog {
     private void calculatePreviewResults() {
         try {
             tableModel.setRowCount(0);
-            System.out.println("Section ID: " + sectionId);
-            System.out.println("Selected Students: " + studentIds.size());
-            System.out.println("Selected Components: " + components.size());
+            
+            // OPTIMIZATION: Batch load ALL data upfront
+            batchLoadAllStudentMarks();
+            batchLoadMarkingSystem();
             
             AnalyzerDAO dao = new AnalyzerDAO();
             StudentCalculator calculator = new StudentCalculator(40.0);
             
             // Get students by section
             List<Student> allStudents = dao.getStudentsBySection(sectionId, LoginScreen.currentUserId);
-            System.out.println("Total students in section: " + allStudents.size());
             
             // Filter to selected students
             List<Student> selectedStudents = allStudents.stream()
                 .filter(student -> studentIds.contains(student.getId()))
                 .toList();
             
-            System.out.println("Filtered to selected: " + selectedStudents.size());
-            
             // Check if we have detailed ranking data with exam types
             if (storedRankingData != null && !storedRankingData.subjects.isEmpty()) {
-                System.out.println("Using detailed ranking structure with exam types");
                 calculateDetailedPreview(selectedStudents, dao, calculator);
             } else {
-                System.out.println("Using simple structure (subject totals only)");
                 calculateSimplePreview(selectedStudents, dao, calculator);
             }
-            
-            System.out.println("=== PREVIEW CALCULATION COMPLETE ===\n");
             
         } catch (Exception e) {
             System.err.println("Error in preview calculation: " + e.getMessage());
@@ -401,7 +402,6 @@ public class ResultPreviewDialog extends JDialog {
             
             for (Student student : selectedStudents) {
                 try {
-                    System.out.println("\nProcessing student: " + student.getName() + " (ID: " + student.getId() + ")");
                     
                     // Get marks for each exam type under each subject
                     java.util.Map<String, java.util.Map<String, Double>> subjectExamMarks = new java.util.LinkedHashMap<>();
@@ -524,7 +524,6 @@ public class ResultPreviewDialog extends JDialog {
             
             for (Student student : selectedStudents) {
                 try {
-                    System.out.println("\nProcessing student: " + student.getName() + " (ID: " + student.getId() + ")");
                     
                     // Calculate subject-wise percentages WITH DUAL PASSING CHECK
                     java.util.Map<String, Double> subjectPercentages = new java.util.LinkedHashMap<>();
@@ -543,14 +542,10 @@ public class ResultPreviewDialog extends JDialog {
                     
                     // Load student component marks for overall calculation
                     List<Component> studentComponents = loadStudentComponentMarks(student.getId());
-                    System.out.println("  Loaded components with marks: " + studentComponents.size());
                     
                     // Calculate results
                     CalculationResult result = calculator.calculateStudentMarks(
                         student.getId(), student.getName(), studentComponents);
-                    
-                    System.out.println("  Result: " + result.getTotalObtained() + "/" + result.getTotalPossible() + 
-                                     " = " + String.format("%.2f", result.getFinalPercentage()) + "%");
                     
                     // Calculate CGPA based on weighted percentage (matching SectionAnalyzer logic)
                     double cgpa = 0.0;
@@ -604,8 +599,6 @@ public class ResultPreviewDialog extends JDialog {
                 });
             }
             
-            System.out.println("=== PREVIEW CALCULATION COMPLETE ===\n");
-            
         } catch (Exception e) {
             System.err.println("Error in calculatePreviewResults: " + e.getMessage());
             e.printStackTrace();
@@ -639,52 +632,101 @@ public class ResultPreviewDialog extends JDialog {
         double cgpa; // Calculated as percentage/10.0 (matching SectionAnalyzer)
     }
     
-    private Double getStudentExamMarks(int studentId, String subjectName, String examTypeName) {
+    /**
+     * OPTIMIZED: Batch load ALL student marks in ONE query instead of N queries per student.
+     * Called once before processing students to eliminate N+1 performance problem.
+     */
+    private void batchLoadAllStudentMarks() {
+        allStudentMarksCache = new HashMap<>();
+        
+        if (studentIds.isEmpty()) return;
+        
+        Connection conn = null;
         try {
-            java.sql.Connection conn = com.sms.database.DatabaseConnection.getConnection();
-            String query = "SELECT sm.marks_obtained " +
+            conn = DatabaseConnection.getConnection();
+            
+            // Build IN clause for batch query
+            StringBuilder idList = new StringBuilder();
+            for (int i = 0; i < studentIds.size(); i++) {
+                if (i > 0) idList.append(",");
+                idList.append(studentIds.get(i));
+            }
+            
+            // SINGLE query fetches ALL marks for ALL students
+            String query = "SELECT sm.student_id, sub.subject_name, et.exam_name, sm.marks_obtained " +
                           "FROM entered_exam_marks sm " +
                           "JOIN subjects sub ON sm.subject_id = sub.id " +
                           "JOIN exam_types et ON sm.exam_type_id = et.id " +
-                          "WHERE sm.student_id = ? AND sub.subject_name = ? AND et.exam_name = ?";
-            java.sql.PreparedStatement ps = conn.prepareStatement(query);
-            ps.setInt(1, studentId);
-            ps.setString(2, subjectName);
-            ps.setString(3, examTypeName);
-            java.sql.ResultSet rs = ps.executeQuery();
-            Double marks = null;
-            if (rs.next()) {
-                marks = rs.getDouble("marks_obtained");
+                          "WHERE sm.student_id IN (" + idList + ") " +
+                          "AND sub.id IN (SELECT subject_id FROM section_subjects WHERE section_id = ?)";
+            
+            PreparedStatement ps = conn.prepareStatement(query);
+            ps.setInt(1, sectionId);
+            ResultSet rs = ps.executeQuery();
+            
+            while (rs.next()) {
+                int studentId = rs.getInt("student_id");
+                String subjectName = rs.getString("subject_name");
+                String examName = rs.getString("exam_name");
+                double marks = rs.getDouble("marks_obtained");
+                
+                allStudentMarksCache.putIfAbsent(studentId, new HashMap<>());
+                allStudentMarksCache.get(studentId).putIfAbsent(subjectName, new HashMap<>());
+                allStudentMarksCache.get(studentId).get(subjectName).put(examName, marks);
             }
             rs.close();
             ps.close();
-            return marks;
+            
         } catch (Exception e) {
-            System.err.println("Error getting marks: " + e.getMessage());
-            return null;
+            System.err.println("Error batch loading marks: " + e.getMessage());
+            e.printStackTrace();
+        } finally {
+            try { if (conn != null) conn.close(); } catch (Exception e) {}
+        }
+    }
+    
+    /**
+     * Fast O(1) lookup from cache instead of database query.
+     */
+    private Double getStudentExamMarks(int studentId, String subjectName, String examTypeName) {
+        if (allStudentMarksCache == null) return null;
+        
+        Map<String, Map<String, Double>> studentMarks = allStudentMarksCache.get(studentId);
+        if (studentMarks == null) return null;
+        
+        Map<String, Double> subjectMarks = studentMarks.get(subjectName);
+        if (subjectMarks == null) return null;
+        
+        return subjectMarks.get(examTypeName);
+    }
+    
+    /**
+     * OPTIMIZED: Load marking system once at start, not per student.
+     */
+    private void batchLoadMarkingSystem() {
+        markingSystem = "old"; // default
+        Connection conn = null;
+        try {
+            conn = DatabaseConnection.getConnection();
+            PreparedStatement ps = conn.prepareStatement(
+                "SELECT marking_system FROM sections WHERE id = ?");
+            ps.setInt(1, sectionId);
+            ResultSet rs = ps.executeQuery();
+            if (rs.next()) {
+                markingSystem = rs.getString("marking_system");
+            }
+            rs.close();
+            ps.close();
+        } catch (Exception e) {
+            System.err.println("Error loading marking system: " + e.getMessage());
+        } finally {
+            try { if (conn != null) conn.close(); } catch (Exception e) {}
         }
     }
     
     private List<Component> loadStudentComponentMarks(int studentId) {
         try {
             AnalyzerDAO dao = new AnalyzerDAO();
-            
-            // Check which marking system this section uses
-            String markingSystem = "old"; // default
-            try {
-                java.sql.Connection conn = com.sms.database.DatabaseConnection.getConnection();
-                java.sql.PreparedStatement ps = conn.prepareStatement(
-                    "SELECT marking_system FROM sections WHERE id = ?");
-                ps.setInt(1, sectionId);
-                java.sql.ResultSet rs = ps.executeQuery();
-                if (rs.next()) {
-                    markingSystem = rs.getString("marking_system");
-                }
-                rs.close();
-                ps.close();
-            } catch (Exception e) {
-                System.err.println("Error checking marking system: " + e.getMessage());
-            }
             
             List<Component> studentComponents = new java.util.ArrayList<>();
             
@@ -722,8 +764,9 @@ public class ResultPreviewDialog extends JDialog {
             } else {
                 // Old system - Use AnalyzerDAO's weighted calculation method PER SUBJECT
                 // This matches SectionAnalyzer's calculation logic
+                java.sql.Connection conn = null;
                 try {
-                    java.sql.Connection conn = com.sms.database.DatabaseConnection.getConnection();
+                    conn = com.sms.database.DatabaseConnection.getConnection();
                     
                     // Get all subjects for this section
                     String subjectQuery = "SELECT DISTINCT sub.id, sub.subject_name FROM section_subjects ss " +
@@ -747,13 +790,9 @@ public class ResultPreviewDialog extends JDialog {
                         double subjectPercentage = result.percentage; // This is 0-100 per subject
                         totalObtained += subjectPercentage;
                         subjectCount++;
-                        
-                        System.out.println("  Subject: " + subjectName + " = " + String.format("%.2f", subjectPercentage) + "/100");
                     }
                     rs.close();
                     ps.close();
-                    
-                    System.out.println("  Total: " + String.format("%.2f", totalObtained) + "/" + (subjectCount * 100));
                     
                     // Create a single "pseudo-component" representing the total
                     // Total obtained = sum of all subject percentages
@@ -772,6 +811,8 @@ public class ResultPreviewDialog extends JDialog {
                 } catch (Exception e) {
                     System.err.println("Error loading marks from old system: " + e.getMessage());
                     e.printStackTrace();
+                } finally {
+                    try { if (conn != null) conn.close(); } catch (Exception e) {}
                 }
             }
             
@@ -793,8 +834,9 @@ public class ResultPreviewDialog extends JDialog {
     
     private List<String> getSubjectsForSection() {
         List<String> subjects = new ArrayList<>();
+        java.sql.Connection conn = null;
         try {
-            java.sql.Connection conn = com.sms.database.DatabaseConnection.getConnection();
+            conn = com.sms.database.DatabaseConnection.getConnection();
             String query = "SELECT DISTINCT sub.subject_name FROM section_subjects ss " +
                           "JOIN subjects sub ON ss.subject_id = sub.id " +
                           "WHERE ss.section_id = ? " +
@@ -809,6 +851,8 @@ public class ResultPreviewDialog extends JDialog {
             ps.close();
         } catch (Exception e) {
             System.err.println("Error loading subjects: " + e.getMessage());
+        } finally {
+            try { if (conn != null) conn.close(); } catch (Exception e) {}
         }
         return subjects;
     }
@@ -892,7 +936,6 @@ public class ResultPreviewDialog extends JDialog {
         // Add both rows to container
         container.add(subjectRow);
         container.add(examTypeRow);
-        System.out.println("DEBUG: subjects count = " + storedRankingData.subjects.size());
         
         return container;
     }

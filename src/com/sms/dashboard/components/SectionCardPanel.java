@@ -12,16 +12,22 @@ public class SectionCardPanel extends JPanel {
     private int sectionId;
     private int userId;
     private Runnable refreshCallback;
+    private com.sms.dashboard.DashboardScreen dashboardScreen;
     private JLabel countLabel;
     private JLabel sectionLabel;
     private boolean isHovered = false;
     
     public SectionCardPanel(String sectionName, int studentCount, int sectionId, int userId, Runnable refreshCallback) {
+        this(sectionName, studentCount, sectionId, userId, refreshCallback, null);
+    }
+    
+    public SectionCardPanel(String sectionName, int studentCount, int sectionId, int userId, Runnable refreshCallback, com.sms.dashboard.DashboardScreen dashboardScreen) {
         this.sectionName = sectionName;
         this.studentCount = studentCount;
         this.sectionId = sectionId;
         this.userId = userId;
         this.refreshCallback = refreshCallback;
+        this.dashboardScreen = dashboardScreen;
         
         setPreferredSize(new Dimension(140, 65));
         setOpaque(false);
@@ -70,34 +76,40 @@ public class SectionCardPanel extends JPanel {
         gbc.insets = new Insets(6, 6, 6, 6);
         add(contentPanel, gbc);
         
-        // Add hover effect and right-click menu
-        addMouseListener(new MouseAdapter() {
-            @Override
-            public void mouseEntered(MouseEvent e) {
-                isHovered = true;
-                repaint();
-            }
-            
-            @Override
-            public void mouseExited(MouseEvent e) {
-                isHovered = false;
-                repaint();
-            }
-            
-            @Override
-            public void mousePressed(MouseEvent e) {
-                if (e.isPopupTrigger()) {
-                    showContextMenu(e);
+        // Only add right-click menu if sectionId is valid (not 0)
+        // For library cards (sectionId=0), YearSemesterPanel will add its own listeners
+        if (sectionId > 0) {
+            // Add hover effect and right-click menu
+            addMouseListener(new MouseAdapter() {
+                @Override
+                public void mouseEntered(MouseEvent e) {
+                    isHovered = true;
+                    repaint();
                 }
-            }
-            
-            @Override
-            public void mouseReleased(MouseEvent e) {
-                if (e.isPopupTrigger()) {
-                    showContextMenu(e);
+                
+                @Override
+                public void mouseExited(MouseEvent e) {
+                    isHovered = false;
+                    repaint();
                 }
-            }
-        });
+                
+                @Override
+                public void mousePressed(MouseEvent e) {
+                    if (e.isPopupTrigger()) {
+                        showContextMenu(e);
+                    }
+                }
+                
+                @Override
+                public void mouseReleased(MouseEvent e) {
+                    if (e.isPopupTrigger()) {
+                        showContextMenu(e);
+                    }
+                }
+            });
+        }
+        // Note: For library view (sectionId=0), no listeners are added here
+        // YearSemesterPanel will add click and hover listeners externally
     }
     
     private void showContextMenu(MouseEvent e) {
@@ -115,11 +127,8 @@ public class SectionCardPanel extends JPanel {
     }
     
     private void showEditDialog() {
-        // Get the DashboardScreen instance and show edit panel
-        Window window = SwingUtilities.getWindowAncestor(this);
-        if (window instanceof com.sms.dashboard.DashboardScreen) {
-            com.sms.dashboard.DashboardScreen dashboard = (com.sms.dashboard.DashboardScreen) window;
-            dashboard.showEditSectionPanel(sectionId);
+        if (dashboardScreen != null) {
+            dashboardScreen.showEditSectionPanel(sectionId);
         }
         
         // Refresh will happen when user saves or cancels
@@ -235,5 +244,11 @@ public class SectionCardPanel extends JPanel {
                     ActionEvent.ACTION_PERFORMED, sectionName));
             }
         });
+    }
+    
+    // Public method to set hover state (for external listeners)
+    public void setHovered(boolean hovered) {
+        this.isHovered = hovered;
+        repaint();
     }
 }

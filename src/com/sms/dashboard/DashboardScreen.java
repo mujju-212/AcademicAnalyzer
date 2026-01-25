@@ -282,7 +282,7 @@ public class DashboardScreen extends JFrame implements DashboardActions {
         libraryPanel.add(titlePanel, BorderLayout.NORTH);
         
         // Year/Semester hierarchical panel
-        yearSemesterPanel = new YearSemesterPanel(userId, this::refreshLibrary);
+        yearSemesterPanel = new YearSemesterPanel(userId, this::refreshLibrary, this);
         
         JScrollPane scrollPane = new JScrollPane(yearSemesterPanel);
         scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
@@ -580,25 +580,37 @@ public class DashboardScreen extends JFrame implements DashboardActions {
     
     // New method to show section ranking table from library
     public void showSectionRankingTable(int sectionId, String sectionName) {
-        System.out.println("@@@ DASHBOARD: Showing ranking table for section " + sectionName + " (ID: " + sectionId + ") @@@");
-        
-        // Create a new panel for the ranking table view
-        String SECTION_RANKING_VIEW = "sectionRanking_" + sectionId;
-        
-        // Remove any existing section ranking view
-        for (Component comp : mainContentPanel.getComponents()) {
-            if (comp.getName() != null && comp.getName().startsWith("sectionRanking_")) {
-                mainContentPanel.remove(comp);
+        // Run the database query in background to avoid freezing UI
+        BackgroundTaskUtil.executeAsync(() -> {
+            try {
+                // Create a new panel for the ranking table view
+                String SECTION_RANKING_VIEW = "sectionRanking_" + sectionId;
+                
+                // Create the ranking table panel (this does DB query)
+                JPanel rankingPanel = createSectionRankingPanel(sectionId, sectionName);
+                rankingPanel.setName(SECTION_RANKING_VIEW);
+                
+                // Switch back to UI thread to update the display
+                SwingUtilities.invokeLater(() -> {
+                    
+                    // Remove any existing section ranking view
+                    for (Component comp : mainContentPanel.getComponents()) {
+                        if (comp.getName() != null && comp.getName().startsWith("sectionRanking_")) {
+                            mainContentPanel.remove(comp);
+                        }
+                    }
+                    
+                    mainContentPanel.add(rankingPanel, SECTION_RANKING_VIEW);
+                    
+                    // Show the ranking table
+                    cardLayout.show(mainContentPanel, SECTION_RANKING_VIEW);
+                });
+            } catch (Exception e) {
+                e.printStackTrace();
+                SwingUtilities.invokeLater(() -> 
+                    DashboardErrorHandler.handleError("Failed to load section ranking", e));
             }
-        }
-        
-        // Create the ranking table panel
-        JPanel rankingPanel = createSectionRankingPanel(sectionId, sectionName);
-        rankingPanel.setName(SECTION_RANKING_VIEW);
-        mainContentPanel.add(rankingPanel, SECTION_RANKING_VIEW);
-        
-        // Show the ranking table
-        cardLayout.show(mainContentPanel, SECTION_RANKING_VIEW);
+        });
     }
     
     private JPanel createSectionRankingPanel(int sectionId, String sectionName) {
@@ -840,9 +852,7 @@ public class DashboardScreen extends JFrame implements DashboardActions {
             table.getColumnModel().getColumn(i).setCellRenderer(cellRenderer);
         }
         
-        // Populate table with data - USE WEIGHTED CALCULATION FOR TOTALS
-        AnalyzerDAO dao = new AnalyzerDAO();
-        
+        // Populate table with data - USE PRE-CALCULATED VALUES FROM RANKING DATA
         for (AnalyzerDAO.StudentRankingDetail student : rankingData.students) {
             Object[] rowData = new Object[columnList.size()];
             int col = 0;
@@ -850,9 +860,6 @@ public class DashboardScreen extends JFrame implements DashboardActions {
             rowData[col++] = student.rank;
             rowData[col++] = student.rollNumber;
             rowData[col++] = student.studentName;
-            
-            // Get student ID for weighted calculation
-            int studentId = getStudentIdByRollNumber(student.rollNumber, sectionId);
             
             // Add marks for each subject's exam types and total
             for (AnalyzerDAO.SubjectInfoDetailed subject : rankingData.subjects) {
@@ -865,15 +872,9 @@ public class DashboardScreen extends JFrame implements DashboardActions {
                         rowData[col++] = marks != null ? String.format("%.1f", marks) : "-";
                     }
                     
-                    // Calculate WEIGHTED subject total using same method as SectionAnalyzer
-                    // Use subject name and exam types filter (null = use all exam types)
-                    AnalyzerDAO.SubjectPassResult result = dao.calculateWeightedSubjectTotalWithPass(
-                        studentId, 
-                        sectionId, 
-                        subject.subjectName,
-                        null  // null = use all exam types
-                    );
-                    rowData[col++] = result.percentage >= 0 ? String.format("%.2f", result.percentage) : "-";
+                    // Use PRE-CALCULATED weighted percentage (out of 100)
+                    Double subjectTotal = student.subjectTotals.get(subject.subjectName);
+                    rowData[col++] = subjectTotal != null ? String.format("%.2f", subjectTotal) : "-";
                 } else {
                     // No marks for this subject - fill with dashes
                     for (int j = 0; j < subject.examTypes.size() + 1; j++) {
@@ -943,8 +944,9 @@ public class DashboardScreen extends JFrame implements DashboardActions {
     
     // Helper method to get student ID by roll number
     private int getStudentIdByRollNumber(String rollNumber, int sectionId) {
+        Connection conn = null;
         try {
-            Connection conn = DatabaseConnection.getConnection();
+            conn = DatabaseConnection.getConnection();
             String query = "SELECT id FROM students WHERE roll_number = ? AND section_id = ?";
             PreparedStatement ps = conn.prepareStatement(query);
             ps.setString(1, rollNumber);
@@ -961,13 +963,20 @@ public class DashboardScreen extends JFrame implements DashboardActions {
         } catch (SQLException e) {
             e.printStackTrace();
             return 0;
+        } finally {
+            try {
+                if (conn != null) conn.close(); // Return connection to pool!
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
     }
     
     // Helper method to get subject ID by name
     private int getSubjectIdByName(String subjectName, int sectionId) {
+        Connection conn = null;
         try {
-            Connection conn = DatabaseConnection.getConnection();
+            conn = DatabaseConnection.getConnection();
             String query = "SELECT subject_id FROM section_subjects ss " +
                           "JOIN subjects sub ON ss.subject_id = sub.id " +
                           "WHERE ss.section_id = ? AND sub.subject_name = ?";
@@ -986,6 +995,12 @@ public class DashboardScreen extends JFrame implements DashboardActions {
         } catch (SQLException e) {
             e.printStackTrace();
             return 0;
+        } finally {
+            try {
+                if (conn != null) conn.close(); // Return connection to pool!
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
     }
     
@@ -1019,13 +1034,23 @@ public class DashboardScreen extends JFrame implements DashboardActions {
     
     @Override
     public void refreshDashboard() {
-        SwingUtilities.invokeLater(() -> {
+        BackgroundTaskUtil.executeAsync(() -> {
             try {
-                populateYearFilter(); // Populate year dropdown first
-                loadSectionCards();
-                updateAnalytics();
+                // Load sections ONCE and reuse for all operations
+                List<SectionInfo> allSections = sectionService.getUserSections(userId);
+                
+                SwingUtilities.invokeLater(() -> {
+                    try {
+                        populateYearFilterFromSections(allSections);
+                        updateSectionCardsFromSections(allSections);
+                        updateAnalytics();
+                    } catch (Exception e) {
+                        DashboardErrorHandler.handleError("Failed to refresh dashboard", e);
+                    }
+                });
             } catch (Exception e) {
-                DashboardErrorHandler.handleError("Failed to refresh dashboard", e);
+                SwingUtilities.invokeLater(() -> 
+                    DashboardErrorHandler.handleError("Failed to load sections", e));
             }
         });
     }
@@ -1051,35 +1076,37 @@ public class DashboardScreen extends JFrame implements DashboardActions {
         BackgroundTaskUtil.executeAsync(() -> {
             try {
                 List<SectionInfo> allSections = sectionService.getUserSections(userId);
-                java.util.Set<Integer> years = new java.util.TreeSet<>(java.util.Collections.reverseOrder());
-                
-                // Collect unique years
-                for (SectionInfo section : allSections) {
-                    if (section.academicYear > 0) {
-                        years.add(section.academicYear);
-                    }
-                }
-                
-                SwingUtilities.invokeLater(() -> {
-                    yearFilterComboBox.removeAllItems();
-                    yearFilterComboBox.addItem("All Years");
-                    
-                    for (Integer year : years) {
-                        yearFilterComboBox.addItem(String.valueOf(year));
-                    }
-                    
-                    // Set selected item based on current filter
-                    if (selectedYear == 0) {
-                        yearFilterComboBox.setSelectedItem("All Years");
-                    } else {
-                        yearFilterComboBox.setSelectedItem(String.valueOf(selectedYear));
-                    }
-                });
+                SwingUtilities.invokeLater(() -> populateYearFilterFromSections(allSections));
             } catch (Exception e) {
                 SwingUtilities.invokeLater(() -> 
                     DashboardErrorHandler.handleError("Failed to load year filter", e));
             }
         });
+    }
+    
+    private void populateYearFilterFromSections(List<SectionInfo> allSections) {
+        java.util.Set<Integer> years = new java.util.TreeSet<>(java.util.Collections.reverseOrder());
+        
+        // Collect unique years
+        for (SectionInfo section : allSections) {
+            if (section.academicYear > 0) {
+                years.add(section.academicYear);
+            }
+        }
+        
+        yearFilterComboBox.removeAllItems();
+        yearFilterComboBox.addItem("All Years");
+        
+        for (Integer year : years) {
+            yearFilterComboBox.addItem(String.valueOf(year));
+        }
+        
+        // Set selected item based on current filter
+        if (selectedYear == 0) {
+            yearFilterComboBox.setSelectedItem("All Years");
+        } else {
+            yearFilterComboBox.setSelectedItem(String.valueOf(selectedYear));
+        }
     }
     
     private void refreshLibrary() {
@@ -1102,21 +1129,23 @@ public class DashboardScreen extends JFrame implements DashboardActions {
         BackgroundTaskUtil.executeAsync(() -> {
             try {
                 List<SectionInfo> allSections = sectionService.getUserSections(userId);
-                
-                // Filter sections by selected year
-                List<SectionInfo> filteredSections = new java.util.ArrayList<>();
-                for (SectionInfo section : allSections) {
-                    if (selectedYear == 0 || section.academicYear == selectedYear) {
-                        filteredSections.add(section);
-                    }
-                }
-                
-                SwingUtilities.invokeLater(() -> updateSectionCards(filteredSections));
+                SwingUtilities.invokeLater(() -> updateSectionCardsFromSections(allSections));
             } catch (Exception e) {
                 SwingUtilities.invokeLater(() -> 
                     DashboardErrorHandler.handleError("Failed to load sections", e));
             }
         });
+    }
+    
+    private void updateSectionCardsFromSections(List<SectionInfo> allSections) {
+        // Filter sections by selected year
+        List<SectionInfo> filteredSections = new java.util.ArrayList<>();
+        for (SectionInfo section : allSections) {
+            if (selectedYear == 0 || section.academicYear == selectedYear) {
+                filteredSections.add(section);
+            }
+        }
+        updateSectionCards(filteredSections);
     }
     
     private void updateSectionCards(List<SectionInfo> sections) {
@@ -1131,7 +1160,8 @@ public class DashboardScreen extends JFrame implements DashboardActions {
                     section.totalStudents,
                     section.id,
                     userId,
-                    this::refreshDashboard
+                    this::refreshDashboard,
+                    this
                 );
                 sectionCardsPanel.add(card);
             }
