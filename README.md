@@ -55,7 +55,7 @@
 
 ---
 
-## � Video Demo
+## 🎥 Video Demo
 
 <div align="center">
 
@@ -73,7 +73,7 @@ Watch the full demonstration of Academic Analyzer, covering all features from lo
 
 ---
 
-## �🎯 Key Features
+## 🎯 Key Features
 
 ![Features Overview](resources/images/features.png)
 
@@ -643,10 +643,20 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 👥 Authors
 
-**Development Team**
-- Lead Developer - System Architecture & Backend
-- UI/UX Designer - Interface Design
-- Database Administrator - Schema Design
+**Mujutaba M N** - *Solo Developer & Architect*
+
+[![GitHub](https://img.shields.io/badge/GitHub-Profile-181717?style=flat&logo=github)](../../)
+[![Email](https://img.shields.io/badge/Email-mujju718263@gmail.com-D14836?style=flat&logo=gmail&logoColor=white)](mailto:mujju718263@gmail.com)
+
+*Sole developer responsible for:*
+- 🏗️ System Architecture & Design
+- 💻 Full Stack Development (Java + Python)
+- 🎨 UI/UX Design & Implementation
+- 🗄️ Database Design & Optimization
+- ☁️ Azure Cloud Deployment
+- 📧 Email Integration & Automation
+- 📊 Analytics & Reporting System
+- 🌐 Web Portal Development
 
 ---
 
@@ -666,7 +676,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 Need help? Reach out:
 
-- 📧 Email: support@academicanalyzer.com
+- 📧 Email: mujju718263@gmail.com
 - 🌐 Web Portal: [academicanalyzer-portal.azurewebsites.net](https://academicanalyzer-portal.azurewebsites.net/results)
 - 📖 Documentation: [docs/INDEX.md](docs/INDEX.md)
 - 💬 Issues: [GitHub Issues](../../issues)
