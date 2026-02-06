@@ -21,6 +21,7 @@
 ## 📋 Table of Contents
 
 - [Overview](#-overview)
+- [Video Demo](#-video-demo)
 - [Key Features](#-key-features)
 - [Architecture](#-architecture)
 - [Technology Stack](#-technology-stack)
@@ -54,7 +55,25 @@
 
 ---
 
-## 🎯 Key Features
+## � Video Demo
+
+<div align="center">
+
+### 📹 Complete System Walkthrough
+
+Watch the full demonstration of Academic Analyzer, covering all features from login to result portal deployment.
+
+[![Academic Analyzer Demo](https://img.youtube.com/vi/8Su_4x62NY0/maxresdefault.jpg)](https://youtu.be/8Su_4x62NY0)
+
+**[▶️ Watch on YouTube](https://youtu.be/8Su_4x62NY0)**
+
+*Duration: ~12 minutes | Topics: Login, Dashboard, Student Management, Marks Entry, Analytics, Result Launcher, Portal*
+
+</div>
+
+---
+
+## �🎯 Key Features
 
 ![Features Overview](resources/images/features.png)
 

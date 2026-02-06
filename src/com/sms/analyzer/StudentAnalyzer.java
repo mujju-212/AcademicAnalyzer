@@ -431,17 +431,19 @@ public class StudentAnalyzer extends JPanel {
                 com.itextpdf.text.pdf.PdfWriter writer = com.itextpdf.text.pdf.PdfWriter.getInstance(document, new java.io.FileOutputStream(filePath));
                 document.open();
                 
-                // Add Logo
+                // Add Logo - load from classpath resources
                 try {
-                    java.io.File logoFile = new java.io.File("resources/images/AA LOGO.png");
-                    if (logoFile.exists()) {
-                        com.itextpdf.text.Image logo = com.itextpdf.text.Image.getInstance(logoFile.getAbsolutePath());
+                    java.io.InputStream logoStream = com.sms.util.ResourceLoader.getResourceStream("images/AA LOGO.png");
+                    if (logoStream != null) {
+                        com.itextpdf.text.Image logo = com.itextpdf.text.Image.getInstance(logoStream.readAllBytes());
                         logo.scaleToFit(120, 72);
                         logo.setAlignment(com.itextpdf.text.Element.ALIGN_CENTER);
                         document.add(logo);
                         document.add(new com.itextpdf.text.Paragraph(" "));
+                        logoStream.close();
                     }
                 } catch (Exception ex) {
+                    System.err.println("Failed to load logo in PDF: " + ex.getMessage());
                     // If logo not found, continue without it
                     System.err.println("Warning: Could not load logo: " + ex.getMessage());
                 }

@@ -864,7 +864,7 @@ public class AnalyzerDAO {
                     while (rsSubjects.next()) {
                         String subjectName = rsSubjects.getString("subject_name");
                         Set<String> examTypesFilter = (selectedFilters != null) ? selectedFilters.get(subjectName) : null;
-                        SubjectPassResult result = calculateWeightedSubjectTotalWithPass(studentId, sectionId, subjectName, examTypesFilter);
+                        SubjectPassResult result = calculateWeightedSubjectTotalWithPass(conn, studentId, sectionId, subjectName, examTypesFilter);
                         totalWeightedMarks += result.percentage; // This is the weighted percentage out of 100 for this subject
                     }
                     rsSubjects.close();
@@ -919,7 +919,7 @@ public class AnalyzerDAO {
                 int failedCount = 0;
                 for (String subjectName : allSubjects) {
                     Set<String> examTypesFilter = (selectedFilters != null) ? selectedFilters.get(subjectName) : null;
-                    SubjectPassResult result = calculateWeightedSubjectTotalWithPass(studentId, sectionId, subjectName, examTypesFilter);
+                    SubjectPassResult result = calculateWeightedSubjectTotalWithPass(conn, studentId, sectionId, subjectName, examTypesFilter);
                     if (!result.passed) {
                         failedCount++;
                     }
@@ -1120,7 +1120,7 @@ public class AnalyzerDAO {
         
         // For each student, calculate THIS SUBJECT's weighted percentage with dual passing
         for (int studentId : studentIds) {
-            SubjectPassResult result = calculateWeightedSubjectTotalWithPass(studentId, sectionId, subjectName, examTypesFilter);
+            SubjectPassResult result = calculateWeightedSubjectTotalWithPass(conn, studentId, sectionId, subjectName, examTypesFilter);
             
             if (result.percentage >= 0) {
                 totalPercentage += result.percentage;
@@ -1707,14 +1707,34 @@ public class AnalyzerDAO {
      * @return SubjectPassResult with percentage and pass/fail status
      */
     public SubjectPassResult calculateWeightedSubjectTotalWithPass(int studentId, int sectionId, String subjectName, Set<String> selectedExamTypes) {
+        // Backward compatibility wrapper - opens its own connection
+        Connection conn = null;
+        try {
+            conn = DatabaseConnection.getConnection();
+            return calculateWeightedSubjectTotalWithPass(conn, studentId, sectionId, subjectName, selectedExamTypes);
+        } catch (SQLException e) {
+            e.printStackTrace();
+            return new SubjectPassResult(-1, false, false, false, new ArrayList<>());
+        } finally {
+            try {
+                if (conn != null) conn.close();
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+    
+    /**
+     * Calculate weighted subject total with pass/fail status (connection-reuse version)
+     * @param conn Existing database connection (not closed by this method)
+     */
+    private SubjectPassResult calculateWeightedSubjectTotalWithPass(Connection conn, int studentId, int sectionId, String subjectName, Set<String> selectedExamTypes) {
         List<String> failedComponents = new ArrayList<>();
         double weightedTotal = 0.0;
         int componentsIncluded = 0;
         boolean allComponentsPassed = true;
-        Connection conn = null;
         
         try {
-            conn = DatabaseConnection.getConnection();
             
             // Get subject ID and passing marks from section_subjects
             String subjectQuery = "SELECT sub.id, ss.passing_marks " +
@@ -1817,13 +1837,8 @@ public class AnalyzerDAO {
         } catch (SQLException e) {
             e.printStackTrace();
             return new SubjectPassResult(-1, false, false, false, failedComponents);
-        } finally {
-            try {
-                if (conn != null) conn.close();
-            } catch (SQLException e) {
-                e.printStackTrace();
-            }
         }
+        // NOTE: Connection is NOT closed here - caller owns it
     }
     
     /**
@@ -2870,7 +2885,7 @@ public class AnalyzerDAO {
                     
                     // Use the SAME method as Top 5 Students for consistency
                     Set<String> examTypesFilter = (selectedFilters != null) ? selectedFilters.get(subject.subjectName) : null;
-                    SubjectPassResult result = calculateWeightedSubjectTotalWithPass(studentId, sectionId, subject.subjectName, examTypesFilter);
+                    SubjectPassResult result = calculateWeightedSubjectTotalWithPass(conn, studentId, sectionId, subject.subjectName, examTypesFilter);
                     
                     double weightedTotal = Math.abs(result.percentage);
                     student.subjectTotals.put(subject.subjectName, weightedTotal);

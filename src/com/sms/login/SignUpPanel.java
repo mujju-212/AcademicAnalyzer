@@ -81,18 +81,17 @@ public class SignUpPanel extends JPanel {
         ));
         card.setPreferredSize(new Dimension(520, 950));
         
-        // Logo - load from resources folder directly
+        // Logo - load from classpath resources
         try {
-            java.io.File logoFile = new java.io.File("resources/images/AA LOGO.png");
-            if (logoFile.exists()) {
-                ImageIcon logoIcon = new ImageIcon(logoFile.getAbsolutePath());
-                Image scaledImage = logoIcon.getImage().getScaledInstance(150, 90, Image.SCALE_SMOOTH);
-                JLabel logoLabel = new JLabel(new ImageIcon(scaledImage));
+            ImageIcon logoIcon = com.sms.util.ResourceLoader.loadScaledImage("images/AA LOGO.png", 150, 90);
+            if (logoIcon != null) {
+                JLabel logoLabel = new JLabel(logoIcon);
                 logoLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
                 card.add(logoLabel);
                 card.add(Box.createVerticalStrut(18));
             }
         } catch (Exception e) {
+            System.err.println("Failed to load logo: " + e.getMessage());
             // Continue without logo
         }
         
